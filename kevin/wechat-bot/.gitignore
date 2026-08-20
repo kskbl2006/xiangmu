@@ -1,0 +1,27 @@
+# 构建产物
+target/
+*.class
+*.jar
+!/.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# 日志
+logs/
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 工具目录（JDK/Maven 本地安装包）
+tools/
+
+# 敏感配置（如包含真实 API Key 可改为忽略）
+# application.properties
