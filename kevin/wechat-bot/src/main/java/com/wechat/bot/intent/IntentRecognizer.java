@@ -34,8 +34,10 @@ public class IntentRecognizer {
         IMAGE_GEN,
         /** 语音回复请求 */
         VOICE_REPLY,
-        /** 多步工具链式调用演示 */
-        CHAIN_DEMO
+        /** 多步工具链式调用演示（串行） */
+        CHAIN_DEMO,
+        /** 多工具并行协作演示 */
+        MULTI_DEMO
     }
 
     private static final Pattern WEATHER_PATTERN = Pattern.compile(
@@ -48,6 +50,8 @@ public class IntentRecognizer {
             "语音说|用语音|发语音|语音回复");
     private static final Pattern CHAIN_PATTERN = Pattern.compile(
             "#chain|#链式");
+    private static final Pattern MULTI_PATTERN = Pattern.compile(
+            "#multi|#并行");
 
     private static final String SYSTEM_PROMPT = """
             你是一个意图分类器。请判断用户消息属于以下哪种意图，只输出 JSON：
@@ -99,6 +103,9 @@ public class IntentRecognizer {
     private Intent recognizeByRule(String text) {
         if (CHAIN_PATTERN.matcher(text).find()) {
             return Intent.CHAIN_DEMO;
+        }
+        if (MULTI_PATTERN.matcher(text).find()) {
+            return Intent.MULTI_DEMO;
         }
         if (WEATHER_PATTERN.matcher(text).find()) {
             return Intent.WEATHER;

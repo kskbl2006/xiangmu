@@ -43,8 +43,9 @@ public class BotApplication {
         AppConfig config = AppConfig.load();
         logSelfTestLogs();
 
-        if (config.llmApiKey().isBlank() || config.llmApiKey().contains("你的")) {
-            log.error("未配置 llm.api-key！请编辑 src/main/resources/application.properties 填入智谱 API Key");
+        if (!config.isLlmApiKeyValid()) {
+            log.error("未配置 llm.api-key（或仍为占位符「你的API_KEY」）！"
+                    + "请编辑 src/main/resources/application.properties 填入智谱 API Key 后重启");
             log.warn("LLM 相关功能（对话/意图识别/工具调用）将不可用，仅微信收发消息可用");
         }
 
@@ -120,7 +121,8 @@ public class BotApplication {
             // ---------- 5. 消息长轮询循环（JDK21 虚拟线程工厂） ----------
             startPollLoop(wechatClient);
 
-            log.info("机器人已就绪：私聊发送消息即可对话；发送「#chain 城市」体验多步工具链式调用");
+            log.info("机器人已就绪：私聊发送消息即可对话；发送「#chain 城市」体验串行链式调用；"
+                    + "发送「#multi 城市1 城市2」体验多工具并行协作");
             log.info("已注册工具：{}", toolRegistry.toToolDefinitions().stream()
                     .map(d -> d.getFunction().getName()).toList());
 

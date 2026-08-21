@@ -139,7 +139,7 @@ public class LlmClient {
 
         Request request = new Request.Builder()
                 .url(config.llmBaseUrl() + "/audio/speech")
-                .header("Authorization", "Bearer " + config.llmApiKey())
+                .header("Authorization", authHeader())
                 .post(RequestBody.create(mapper.writeValueAsBytes(body), JSON))
                 .build();
 
@@ -155,10 +155,24 @@ public class LlmClient {
 
     // ---------------- 内部方法 ----------------
 
+    /**
+     * 构造 Authorization 头：请求前校验 Key 合法性，
+     * 避免非法字符触发 OkHttp "Unexpected char"晦涩报错。
+     */
+    private String authHeader() throws IOException {
+        String key = config.llmApiKey();
+        if (key.isBlank() || key.contains("API_KEY")) {
+            throw new IOException("llm.api-key 未配置或仍为占位符："
+                    + "请在 src/main/resources/application.properties 填入智谱 API Key"
+                    + "（open.bigmodel.cn 免费申请）后重启机器人");
+        }
+        return "Bearer " + key;
+    }
+
     private JsonNode post(String url, ObjectNode body) throws IOException {
         Request request = new Request.Builder()
                 .url(url)
-                .header("Authorization", "Bearer " + config.llmApiKey())
+                .header("Authorization", authHeader())
                 .header("Content-Type", "application/json")
                 .post(RequestBody.create(mapper.writeValueAsBytes(body), JSON))
                 .build();

@@ -9,6 +9,7 @@ import com.wechat.bot.config.AppConfig;
 import com.wechat.bot.intent.IntentRecognizer;
 import com.wechat.bot.llm.LlmClient;
 import com.wechat.bot.llm.model.ChatMessage;
+import com.wechat.bot.llm.model.ToolCall;
 import com.wechat.bot.tool.ToolRegistry;
 import com.wechat.bot.tool.WeatherTool;
 import com.wechat.bot.voice.VoiceService;
@@ -20,7 +21,10 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -38,7 +42,11 @@ public class BotMessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(BotMessageHandler.class);
     private static final Pattern CHAIN_CITY = Pattern.compile("#chain\\s*(\\S+)");
+    private static final Pattern MULTI_CITIES = Pattern.compile("#multi\\s+(.+)");
     private static final int MAX_HISTORY = 20;
+
+    /** 工具并行执行线程池：JDK21 虚拟线程，每任务一线程，轻量高效 */
+    private static final ExecutorService TOOL_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
 
     private final AppConfig config;
     private final LlmClient llmClient;
@@ -127,6 +135,7 @@ public class BotMessageHandler {
         IntentRecognizer.Intent intent = intentRecognizer.recognize(text);
         switch (intent) {
             case CHAIN_DEMO -> runChainDemo(fromUserId, text);
+            case MULTI_DEMO -> runMultiDemo(fromUserId, text);
             case IMAGE_GEN -> handleImageGeneration(fromUserId, text);
             case VOICE_REPLY -> handleVoiceReply(fromUserId, text);
             default -> handleChatWithTools(fromUserId, text, fromVoice);
@@ -171,8 +180,13 @@ public class BotMessageHandler {
     }
 
     /**
-     * Function Calling 多轮循环：支持多步工具调用，
-     * 后续步骤可基于前一步工具结果继续调用（链式）。
+     * Function Calling 多轮循环：支持多步工具调用，兼容串行与并行两种协作模式。
+     * <ul>
+     *   <li>串行（轮次间依赖）：上一轮工具结果回传后，下一轮模型基于结果继续调用，
+     *       形成 A→B→C 的链式调用</li>
+     *   <li>并行（轮内并发）：同一轮模型返回的多个 tool_calls 之间无数据依赖，
+     *       使用 JDK21 虚拟线程并行执行，结果按原顺序回传</li>
+     * </ul>
      */
     private String runFunctionCallingLoop(List<ChatMessage> history) throws IOException {
         for (int round = 1; round <= config.maxToolRounds(); round++) {
@@ -188,16 +202,36 @@ public class BotMessageHandler {
             // 模型请求调用工具：先记录 assistant 的工具调用消息
             history.add(ChatMessage.assistantToolCalls(result.toolCalls()));
 
-            for (var call : result.toolCalls()) {
-                log.info("第 {} 轮工具调用：{}({})", round, call.name(), call.arguments());
-                JsonNode args = parseArguments(call.arguments());
-                String toolResult = toolRegistry.execute(call.name(), args);
-                log.info("工具 {} 返回：{}", call.name(),
-                        toolResult.length() > 200 ? toolResult.substring(0, 200) + "..." : toolResult);
-                // 工具结果回传，供下一轮模型使用
+            List<ToolCall> calls = result.toolCalls();
+            long start = System.currentTimeMillis();
+            if (calls.size() == 1) {
+                // 单工具调用：直接串行执行
+                ToolCall call = calls.get(0);
+                log.info("第 {} 轮工具调用（串行）：{}({})", round, call.name(), call.arguments());
+                String toolResult = toolRegistry.execute(call.name(), parseArguments(call.arguments()));
                 history.add(ChatMessage.toolResult(call.getId(), call.name(), toolResult));
+            } else {
+                // 多工具调用：并行执行（虚拟线程），结果按原顺序回传
+                log.info("第 {} 轮模型请求 {} 个工具，开始并行执行：{}", round, calls.size(),
+                        calls.stream().map(ToolCall::name).toList());
+                List<CompletableFuture<String>> futures = new ArrayList<>();
+                for (ToolCall call : calls) {
+                    JsonNode args = parseArguments(call.arguments());
+                    futures.add(CompletableFuture.supplyAsync(
+                            () -> toolRegistry.execute(call.name(), args), TOOL_EXECUTOR));
+                }
+                for (int i = 0; i < calls.size(); i++) {
+                    ToolCall call = calls.get(i);
+                    String toolResult = futures.get(i).join();
+                    log.info("并行工具 {} 完成，返回：{}", call.name(),
+                            toolResult.length() > 100 ? toolResult.substring(0, 100) + "..." : toolResult);
+                    // 工具结果回传，供下一轮模型使用
+                    history.add(ChatMessage.toolResult(call.getId(), call.name(), toolResult));
+                }
+                log.info("第 {} 轮 {} 个工具并行执行完成，总耗时 {} ms",
+                        round, calls.size(), System.currentTimeMillis() - start);
             }
-            // 进入下一轮：模型基于工具结果继续推理或再次调用工具
+            // 进入下一轮：模型基于工具结果继续推理或再次调用工具（串行链）
         }
         return "这个问题需要太多步骤了，我最多支持 " + config.maxToolRounds() + " 轮工具调用～";
     }
@@ -248,6 +282,75 @@ public class BotMessageHandler {
         } catch (Exception e) {
             log.error("链式调用演示失败", e);
             safeSendText(fromUserId, "链式调用演示失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 多工具协作演示（并行模式）：#multi 城市1 城市2 ...
+     * <p>与 #chain 的串行模式相对，本命令演示多工具并行协作：
+     * <ol>
+     *   <li>并行阶段：多个 WeatherTool（每城市一个）+ DateTimeTool 同时执行，
+     *       各任务之间无数据依赖，虚拟线程并发跑满</li>
+     *   <li>汇总阶段（串行依赖并行结果）：所有工具完成后，结果统一交给 LLM
+     *       生成比较结论（如"哪个城市更热"）</li>
+     * </ol>
+     */
+    private void runMultiDemo(String fromUserId, String text) {
+        Matcher m = MULTI_CITIES.matcher(text);
+        if (!m.find()) {
+            safeSendText(fromUserId, "用法：#multi 城市1 城市2 [城市3...]\n例如：#multi 北京 上海 广州\n"
+                    + "（演示多工具并行协作：多城市天气+时间同时查询，LLM 汇总比较）");
+            return;
+        }
+        String[] cities = m.group(1).trim().split("\\s+");
+        if (cities.length < 2) {
+            safeSendText(fromUserId, "请至少提供 2 个城市，例如：#multi 北京 上海");
+            return;
+        }
+
+        try {
+            safeSendText(fromUserId, "▶ 多工具并行协作演示\n并行阶段：同时查询 "
+                    + cities.length + " 个城市天气 + 当前时间（共 " + (cities.length + 1) + " 个工具任务）...");
+            long start = System.currentTimeMillis();
+
+            // ---- 并行阶段：每城市一个天气任务 + 一个时间任务，虚拟线程并发执行 ----
+            List<CompletableFuture<String>> futures = new ArrayList<>();
+            List<String> taskNames = new ArrayList<>();
+            for (String city : cities) {
+                taskNames.add("get_weather(" + city + ")");
+                futures.add(CompletableFuture.supplyAsync(
+                        () -> toolRegistry.execute("get_weather",
+                                mapper.createObjectNode().put("city", city).put("days", 1)),
+                        TOOL_EXECUTOR));
+            }
+            taskNames.add("get_datetime");
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> toolRegistry.execute("get_datetime", mapper.createObjectNode()),
+                    TOOL_EXECUTOR));
+
+            // 等待全部完成，按提交顺序收集结果
+            List<String> results = futures.stream().map(CompletableFuture::join).toList();
+            long elapsed = System.currentTimeMillis() - start;
+
+            StringBuilder parallelResult = new StringBuilder();
+            for (int i = 0; i < taskNames.size(); i++) {
+                parallelResult.append("[").append(taskNames.get(i)).append("]\n")
+                        .append(results.get(i)).append("\n\n");
+            }
+            safeSendText(fromUserId, "并行阶段完成 ✅（" + taskNames.size() + " 个任务总耗时 "
+                    + elapsed + " ms，串行预计需 ~" + (elapsed * taskNames.size() / Math.max(elapsed, 1))
+                    + " ms 级别）\n\n" + parallelResult + "汇总阶段：LLM 综合比较生成结论...");
+
+            // ---- 汇总阶段：依赖并行阶段全部结果（串行） ----
+            String summary = llmClient.chat(List.of(
+                    ChatMessage.system("你是数据分析师，根据多个城市的天气数据和当前时间，"
+                            + "用中文简洁比较各城市天气差异，指出最热/最冷/最适合出行的城市，120字以内。"),
+                    ChatMessage.user("工具执行结果：\n" + parallelResult)));
+            safeSendText(fromUserId, "汇总完成 ✅\n" + summary);
+            log.info("多工具并行协作演示完成：{} 个城市，并行耗时 {} ms", cities.length, elapsed);
+        } catch (Exception e) {
+            log.error("多工具并行协作演示失败", e);
+            safeSendText(fromUserId, "并行协作演示失败：" + e.getMessage());
         }
     }
 

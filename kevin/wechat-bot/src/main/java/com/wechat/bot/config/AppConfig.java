@@ -57,8 +57,28 @@ public final class AppConfig {
         return Boolean.parseBoolean(get(key, String.valueOf(defaultValue)));
     }
 
+    /**
+     * 获取 LLM API Key（自动清洗）。
+     * <p>曾出现配置值混入中文/空白字符导致 OkHttp 抛出
+     * "Unexpected char 0xe4 in Authorization value" 的问题，
+     * 此处统一去除所有非可见 ASCII 字符。
+     */
     public String llmApiKey() {
-        return get("llm.api-key", "");
+        String raw = get("llm.api-key", "");
+        String cleaned = raw.replaceAll("[^\\x21-\\x7E]", "");
+        if (!cleaned.equals(raw)) {
+            log.warn("llm.api-key 含非法字符（中文/空白等，共 {} 个），已自动清洗；"
+                    + "请检查 application.properties 中是否仍为占位符「你的API_KEY」或粘贴时混入中文", raw.length() - cleaned.length());
+        }
+        return cleaned;
+    }
+
+    /**
+     * API Key 是否为合法的已配置状态（非空、非占位符）。
+     */
+    public boolean isLlmApiKeyValid() {
+        String key = llmApiKey();
+        return !key.isBlank() && !key.contains("API_KEY");
     }
 
     public String llmBaseUrl() {
