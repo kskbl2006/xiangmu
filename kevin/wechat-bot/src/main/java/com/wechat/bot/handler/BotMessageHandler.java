@@ -10,6 +10,9 @@ import com.wechat.bot.intent.IntentRecognizer;
 import com.wechat.bot.llm.LlmClient;
 import com.wechat.bot.llm.model.ChatMessage;
 import com.wechat.bot.llm.model.ToolCall;
+import com.wechat.bot.rag.RagService;
+import com.wechat.bot.skill.Skill;
+import com.wechat.bot.skill.SkillRegistry;
 import com.wechat.bot.tool.ToolRegistry;
 import com.wechat.bot.tool.WeatherTool;
 import com.wechat.bot.voice.VoiceService;
@@ -21,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -30,11 +34,13 @@ import java.util.regex.Pattern;
 
 /**
  * 微信消息处理器：机器人核心业务逻辑。
- * <p>处理流程：
+ * <p>处理流程（三级消息路由 Skill → RAG → LLM 兜底）：
  * <ol>
  *   <li>解析入站消息（文本 / 图片 / 语音）</li>
- *   <li>意图识别（规则 + LLM 两级策略）</li>
- *   <li>按意图分发：工具链式调用 / Function Calling 循环 / 文生图 / 语音回复</li>
+ *   <li>第一级 Skill 关键词：命中即本地执行直接回复（零 LLM 调用）</li>
+ *   <li>原有特殊意图保留：链式/并行演示、文生图、语音回复</li>
+ *   <li>第二级 RAG 关键词：知识库检索命中则增强 Prompt 再交 LLM 回答</li>
+ *   <li>第三级 LLM 兜底：Function Calling 循环 + 多轮上下文闲聊</li>
  *   <li>组装回复并通过 ILinkClient 发送</li>
  * </ol>
  */
@@ -45,6 +51,11 @@ public class BotMessageHandler {
     private static final Pattern MULTI_CITIES = Pattern.compile("#multi\\s+(.+)");
     private static final int MAX_HISTORY = 20;
 
+    /** LLM 兜底闲聊的基础系统提示词（RAG 命中时在其后追加知识库资料） */
+    private static final String BASE_SYSTEM_PROMPT = """
+            你是微信群里的智能小助手，回复简洁友好、口语化。
+            可以调用工具查询天气和时间等实时信息；拿到工具结果后请用自然语言总结回答。""";
+
     /** 工具并行执行线程池：JDK21 虚拟线程，每任务一线程，轻量高效 */
     private static final ExecutorService TOOL_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -54,6 +65,8 @@ public class BotMessageHandler {
     private final ToolRegistry toolRegistry;
     private final WeatherTool weatherTool;
     private final VoiceService voiceService;
+    private final SkillRegistry skillRegistry;
+    private final RagService ragService;
     private final ObjectMapper mapper = new ObjectMapper();
 
     /** 微信客户端（登录后由主程序绑定，因与消息监听器存在相互引用） */
@@ -67,13 +80,17 @@ public class BotMessageHandler {
                              IntentRecognizer intentRecognizer,
                              ToolRegistry toolRegistry,
                              WeatherTool weatherTool,
-                             VoiceService voiceService) {
+                             VoiceService voiceService,
+                             SkillRegistry skillRegistry,
+                             RagService ragService) {
         this.config = config;
         this.llmClient = llmClient;
         this.intentRecognizer = intentRecognizer;
         this.toolRegistry = toolRegistry;
         this.weatherTool = weatherTool;
         this.voiceService = voiceService;
+        this.skillRegistry = skillRegistry;
+        this.ragService = ragService;
     }
 
     /**
@@ -129,34 +146,60 @@ public class BotMessageHandler {
     }
 
     /**
-     * 意图识别与分发。
+     * 三级消息路由：Skill 关键词 → RAG 关键词 → LLM 兜底。
+     * <ol>
+     *   <li>Skill 层：本地关键词命中即执行，直接回复（不调用 LLM）</li>
+     *   <li>特殊意图层：保留原有 #chain / #multi 演示、文生图、语音回复路由</li>
+     *   <li>RAG 层：知识库检索命中 → 增强 Prompt → LLM 基于资料回答</li>
+     *   <li>LLM 兜底层：普通闲聊 + Function Calling（天气/时间等工具仍可用）</li>
+     * </ol>
      */
     private void dispatchIntent(String fromUserId, String text, boolean fromVoice) {
+        // ---- 第一级：Skill 关键词直达 ----
+        Optional<Skill> matchedSkill = skillRegistry.match(text);
+        if (matchedSkill.isPresent()) {
+            log.info("[路由] Skill 层命中：{}", matchedSkill.get().name());
+            safeSendText(fromUserId, skillRegistry.execute(matchedSkill.get(), fromUserId, text));
+            return;
+        }
+
+        // ---- 特殊意图（原有演示能力保留） ----
         IntentRecognizer.Intent intent = intentRecognizer.recognize(text);
         switch (intent) {
             case CHAIN_DEMO -> runChainDemo(fromUserId, text);
             case MULTI_DEMO -> runMultiDemo(fromUserId, text);
             case IMAGE_GEN -> handleImageGeneration(fromUserId, text);
             case VOICE_REPLY -> handleVoiceReply(fromUserId, text);
-            default -> handleChatWithTools(fromUserId, text, fromVoice);
+            default -> {
+                // ---- 第二级：RAG 关键词命中？ ----
+                boolean ragHit = ragService.hit(text);
+                // ---- 第三级：LLM 兜底（RAG 命中时增强 Prompt） ----
+                log.info("[路由] {} 层处理", ragHit ? "RAG 增强 + LLM" : "LLM 兜底");
+                handleChatWithTools(fromUserId, text, fromVoice, ragHit);
+            }
         }
     }
 
     // ---------------- Function Calling 核心循环 ----------------
 
     /**
-     * 带 Function Calling 的对话处理（CHAT/WEATHER/DATETIME 意图统一走此流程）。
+     * 带 Function Calling 的对话处理（RAG 命中与 LLM 兜底统一走此流程）。
      * <p>工作流程：
      * <ol>
+     *   <li>RAG 命中时：检索知识库 Top-K 文档，增强系统 Prompt（资料注入）</li>
      *   <li>将用户消息 + 工具定义发给 LLM</li>
      *   <li>LLM 判断是否需要调用工具：返回 tool_calls 则本地执行工具</li>
      *   <li>工具执行结果以 tool 角色回传，再次请求 LLM</li>
      *   <li>循环直到 LLM 给出最终文本回复（或达到最大轮数）</li>
      * </ol>
      */
-    private void handleChatWithTools(String fromUserId, String text, boolean fromVoice) {
+    private void handleChatWithTools(String fromUserId, String text, boolean fromVoice, boolean ragHit) {
         try {
             List<ChatMessage> history = historyOf(fromUserId);
+            // RAG 增强：命中时把知识库资料拼进系统 Prompt（本轮生效，下一轮按需重建）
+            history.get(0).setContent(ragHit
+                    ? ragService.augmentSystemPrompt(BASE_SYSTEM_PROMPT, text)
+                    : BASE_SYSTEM_PROMPT);
             history.add(ChatMessage.user(text));
 
             String reply = runFunctionCallingLoop(history);
@@ -430,9 +473,7 @@ public class BotMessageHandler {
     private List<ChatMessage> historyOf(String userId) {
         return chatHistories.computeIfAbsent(userId, k -> {
             List<ChatMessage> list = new ArrayList<>();
-            list.add(ChatMessage.system("""
-                    你是微信群里的智能小助手，回复简洁友好、口语化。
-                    可以调用工具查询天气和时间等实时信息；拿到工具结果后请用自然语言总结回答。"""));
+            list.add(ChatMessage.system(BASE_SYSTEM_PROMPT));
             return list;
         });
     }

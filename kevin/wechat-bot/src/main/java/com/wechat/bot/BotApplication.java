@@ -8,6 +8,11 @@ import com.wechat.bot.config.AppConfig;
 import com.wechat.bot.handler.BotMessageHandler;
 import com.wechat.bot.intent.IntentRecognizer;
 import com.wechat.bot.llm.LlmClient;
+import com.wechat.bot.rag.KeywordKnowledgeBase;
+import com.wechat.bot.rag.RagService;
+import com.wechat.bot.skill.FortuneSkill;
+import com.wechat.bot.skill.Skill;
+import com.wechat.bot.skill.SkillRegistry;
 import com.wechat.bot.tool.DateTimeTool;
 import com.wechat.bot.tool.ToolRegistry;
 import com.wechat.bot.tool.WeatherTool;
@@ -58,8 +63,18 @@ public class BotApplication {
                 .register(new DateTimeTool());
         VoiceService voiceService = new VoiceService(llmClient, config.voiceReplyEnabled());
 
+        // Skill 注册中心：关键词直达的轻量能力（第一级路由）
+        SkillRegistry skillRegistry = new SkillRegistry()
+                .register(new FortuneSkill());
+
+        // RAG 服务：极简关键词检索（第二级路由，可用 rag.enabled 开关）
+        RagService ragService = new RagService(
+                new KeywordKnowledgeBase().load(config.ragKnowledgeBase()),
+                config.ragEnabled(), config.ragTopK());
+
         BotMessageHandler handler = new BotMessageHandler(
-                config, llmClient, intentRecognizer, toolRegistry, weatherTool, voiceService);
+                config, llmClient, intentRecognizer, toolRegistry, weatherTool, voiceService,
+                skillRegistry, ragService);
 
         // ---------- 3. 创建微信客户端并注册监听 ----------
         CountDownLatch loginLatch = new CountDownLatch(1);
@@ -123,6 +138,9 @@ public class BotApplication {
 
             log.info("机器人已就绪：私聊发送消息即可对话；发送「#chain 城市」体验串行链式调用；"
                     + "发送「#multi 城市1 城市2」体验多工具并行协作");
+            log.info("消息路由：Skill（{}）→ RAG（{}）→ LLM 兜底",
+                    skillRegistry.all().stream().map(Skill::name).toList(),
+                    ragService.isEnabled() ? "开启" : "关闭");
             log.info("已注册工具：{}", toolRegistry.toToolDefinitions().stream()
                     .map(d -> d.getFunction().getName()).toList());
 

@@ -124,4 +124,19 @@ public final class AppConfig {
     public long typingMillis() {
         return getInt("bot.typing-millis", 1500);
     }
+
+    /** RAG 总开关（关闭后消息路由跳过 RAG 层，用于对比测试） */
+    public boolean ragEnabled() {
+        return getBool("rag.enabled", true);
+    }
+
+    /** RAG 知识库文件（classpath 路径） */
+    public String ragKnowledgeBase() {
+        return get("rag.knowledge-base", "knowledge-base.json");
+    }
+
+    /** RAG 检索返回的最大文档数 */
+    public int ragTopK() {
+        return getInt("rag.top-k", 2);
+    }
 }
