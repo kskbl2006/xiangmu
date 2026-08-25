@@ -1,0 +1,11 @@
+target/
+logs/
+runtime/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+
+# IntelliJ IDEA local state
+.idea/
