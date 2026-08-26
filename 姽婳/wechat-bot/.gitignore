@@ -1,11 +1,27 @@
 target/
 logs/
 runtime/
+output/
+tmp/
 .DS_Store
+**/.DS_Store
 .env
 .env.*
 !.env.example
 *.log
+*.tmp
+*.bak
+*.swp
+*.iml
+dependency-reduced-pom.xml
+hs_err_pid*
+replay_pid*
 
 # IntelliJ IDEA local state
 .idea/
+
+# Other editor-local state
+.vscode/
+.classpath
+.project
+.settings/

@@ -99,6 +99,25 @@ public final class QwenClient {
     return execute(requestBody);
   }
 
+  /** Requests a JSON object under a task-specific system instruction. */
+  public String chatJson(String systemInstruction, String userMessage) throws IOException {
+    if (systemInstruction == null || systemInstruction.isBlank()) {
+      throw new IllegalArgumentException("system instruction must not be blank");
+    }
+    if (userMessage == null || userMessage.isBlank()) {
+      throw new IllegalArgumentException("user message must not be blank");
+    }
+    ObjectNode requestBody = objectMapper.createObjectNode();
+    requestBody.put("model", config.getQwenModel());
+    requestBody.put("stream", false);
+    requestBody.put("enable_thinking", false);
+    requestBody.putObject("response_format").put("type", "json_object");
+    ArrayNode messages = requestBody.putArray("messages");
+    messages.addObject().put("role", "system").put("content", systemInstruction);
+    messages.addObject().put("role", "user").put("content", userMessage);
+    return execute(requestBody);
+  }
+
   public ToolChatResult chatWithTools(
       List<Turn> history, String userMessage, ToolRegistry registry) throws IOException {
     if (userMessage == null || userMessage.isBlank()) {

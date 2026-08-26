@@ -1,17 +1,20 @@
 package com.github.wechat.ilink.bot.message;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.wechat.ilink.bot.agent.CnTripPlannerSkill;
+import com.github.wechat.ilink.bot.agent.QwenCityResolver;
+import com.github.wechat.ilink.bot.agent.TravelAgentService;
+import com.github.wechat.ilink.bot.agent.TravelBriefSkill;
+import com.github.wechat.ilink.bot.agent.TravelPlanReviewSkill;
+import com.github.wechat.ilink.bot.agent.TravelPdfRenderer;
+import com.github.wechat.ilink.bot.agent.TravelTaskStore;
 import com.github.wechat.ilink.bot.config.AppConfig;
 import com.github.wechat.ilink.bot.intent.IntentRecognizer;
 import com.github.wechat.ilink.bot.intent.IntentRecognizer.Intent;
 import com.github.wechat.ilink.bot.llm.QwenClient;
+import com.github.wechat.ilink.bot.maps.BaiduMapClient;
+import com.github.wechat.ilink.bot.maps.TravelMapService;
 import com.github.wechat.ilink.bot.memory.ConversationMemoryStore;
-import com.github.wechat.ilink.bot.rag.KeywordRagRetriever;
-import com.github.wechat.ilink.bot.rag.RagPromptBuilder;
-import com.github.wechat.ilink.bot.routing.MessageRoutePlanner;
-import com.github.wechat.ilink.bot.routing.MessageRoutePlanner.RouteType;
-import com.github.wechat.ilink.bot.skill.BotSelfCheckSkill;
-import com.github.wechat.ilink.bot.skill.SkillRegistry;
 import com.github.wechat.ilink.bot.speech.AudioConverter;
 import com.github.wechat.ilink.bot.speech.QwenAsrClient;
 import com.github.wechat.ilink.bot.speech.QwenTtsClient;
@@ -19,13 +22,17 @@ import com.github.wechat.ilink.bot.tool.CalculatorTool;
 import com.github.wechat.ilink.bot.tool.DateTimeTool;
 import com.github.wechat.ilink.bot.tool.ToolRegistry;
 import com.github.wechat.ilink.bot.tool.WeatherTool;
+import com.github.wechat.ilink.bot.travelrag.InMemoryTravelVectorStore;
+import com.github.wechat.ilink.bot.travelrag.TravelRagService;
 import com.github.wechat.ilink.bot.weather.Weather;
+import com.github.wechat.ilink.bot.weather.OpenMeteoWeather;
 import com.github.wechat.ilink.sdk.ILinkClient;
 import com.github.wechat.ilink.sdk.core.listener.OnMessageListener;
 import com.github.wechat.ilink.sdk.core.model.MessageItem;
 import com.github.wechat.ilink.sdk.core.model.WeixinMessage;
 import com.github.wechat.ilink.sdk.core.model.VoiceItem;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -50,7 +57,11 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
   private final AudioConverter audioConverter = new AudioConverter(Path.of("runtime", "audio"));
   private final IntentRecognizer intentRecognizer = new IntentRecognizer();
   private final ToolRegistry toolRegistry;
-  private final MessageRoutePlanner routePlanner;
+  private final TravelRagService travelRagService;
+  private final TravelAgentService travelAgentService;
+  private final TravelPdfRenderer travelPdfRenderer;
+  private final TravelTaskStore travelTasks =
+      new TravelTaskStore(Path.of("runtime", "travel-tasks.json"));
   private final ConversationMemoryStore memory;
   private final MessageDeduplicator deduplicator =
       new MessageDeduplicator(Duration.ofMinutes(5), 2_000);
@@ -71,31 +82,34 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
     this.asrClient = new QwenAsrClient(config);
     this.ttsClient = new QwenTtsClient(config);
     ObjectMapper objectMapper = new ObjectMapper();
+    Weather weather = new Weather(config);
+    OpenMeteoWeather travelWeather = new OpenMeteoWeather(config);
+    TravelMapService travelMapService =
+        new TravelMapService(new BaiduMapClient(config), config.getBaiduMapMaxPoiQueries());
     this.toolRegistry =
         new ToolRegistry(
             objectMapper,
             List.of(
-                new WeatherTool(new Weather(config), objectMapper),
+                new WeatherTool(weather, objectMapper),
                 new CalculatorTool(objectMapper),
                 new DateTimeTool(objectMapper)));
-    SkillRegistry skillRegistry =
-        new SkillRegistry(
-            List.of(
-                new BotSelfCheckSkill(
-                    config,
-                    toolRegistry.names(),
-                    Path.of("runtime", "wechat-session.json"))));
-    KeywordRagRetriever ragRetriever =
-        KeywordRagRetriever.fromResource(objectMapper, "/rag/bot-knowledge.json");
-    this.routePlanner =
-        new MessageRoutePlanner(
-            skillRegistry, ragRetriever, config.isRagEnabled(), config.getRagTopK());
+    this.travelRagService = TravelRagService.fromBundledIndex(config, objectMapper);
+    this.travelAgentService =
+        new TravelAgentService(
+            new TravelBriefSkill(new QwenCityResolver(qwenClient)),
+            new CnTripPlannerSkill(qwenClient),
+            new TravelPlanReviewSkill(),
+            travelRagService::retrieveAttractionsForPlanning,
+            travelWeather::forecast,
+            travelMapService::enrich);
+    this.travelPdfRenderer = new TravelPdfRenderer(config);
+    log.info("Initialized tool calling: tools={}", toolRegistry.names());
     log.info(
-        "Initialized message knowledge routing: skills={}, ragEnabled={}, ragDocuments={}, ragTopK={}",
-        skillRegistry.names(),
-        config.isRagEnabled(),
-        ragRetriever.size(),
-        config.getRagTopK());
+        "Initialized travel RAG: enabled={}, chunks={}, model={}",
+        config.isTravelRagEnabled(),
+        travelRagService.size(),
+        travelRagService.model());
+    log.info("Initialized Baidu Map enrichment: enabled={}", config.hasBaiduMapApiKey());
   }
 
   @Override
@@ -166,10 +180,32 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
         client.sendText(sender, "已清除当前会话的短期记忆。");
         return;
       }
-      GeneratedReply generated = generateReply(sender, text);
-      client.sendText(sender, generated.text());
-      memory.addTurn(sender, text, generated.text());
-      logRoute(sender, "text", generated.decision());
+      String travelGoal =
+          travelAgentService.supports(text)
+              ? text
+              : travelTasks.resolveGoal(sender, text).orElse(null);
+      if (travelGoal != null) {
+        travelTasks.progress(sender, travelGoal, "已接收");
+        TravelAgentService.Result result;
+        try {
+          result =
+              travelAgentService.execute(
+                  travelGoal, stage -> travelTasks.progress(sender, travelGoal, stage));
+        } catch (Exception e) {
+          travelTasks.progress(sender, travelGoal, "执行失败，可发送“继续上次任务”重试");
+          throw e;
+        }
+        client.sendText(sender, result.reply());
+        sendTravelArtifacts(client, sender, result);
+        storeTravelResult(sender, travelGoal, result);
+        memory.addTurn(sender, text, result.reply());
+        logRoute(sender, "travel-artifacts");
+        return;
+      }
+      String reply = generateReply(sender, text);
+      client.sendText(sender, reply);
+      memory.addTurn(sender, text, reply);
+      logRoute(sender, "text");
     } catch (Exception e) {
       log.error("Failed to process text message for userId={}: {}", sender, e.getMessage(), e);
       sendFailure(sender, "消息处理失败，请稍后重试。");
@@ -237,17 +273,36 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
       log.info("Recognized voice for userId={} via {}: chars={}", sender, transcriptSource, transcript.length());
 
       IntentRecognizer.Result recognized = intentRecognizer.recognize(transcript);
-      GeneratedReply plannedReply;
+      String reply;
+      TravelAgentService.Result travelResult = null;
       if (recognized.intent() == Intent.CLEAR_MEMORY) {
         memory.clear(sender);
-        plannedReply = new GeneratedReply("已清除当前会话的短期记忆。", null);
+        reply = "已清除当前会话的短期记忆。";
       } else {
-        plannedReply = generateReply(sender, transcript);
+        String travelGoal =
+            travelAgentService.supports(transcript)
+                ? transcript
+                : travelTasks.resolveGoal(sender, transcript).orElse(null);
+        if (travelGoal != null) {
+          travelTasks.progress(sender, travelGoal, "已接收");
+          try {
+            travelResult =
+                travelAgentService.execute(
+                    travelGoal, stage -> travelTasks.progress(sender, travelGoal, stage));
+          } catch (Exception e) {
+            travelTasks.progress(sender, travelGoal, "执行失败，可发送“继续上次任务”重试");
+            throw e;
+          }
+          storeTravelResult(sender, travelGoal, travelResult);
+          reply = travelResult.reply();
+        } else {
+          reply = generateReply(sender, transcript);
+        }
       }
-      String reply = plannedReply.text();
       client.sendText(sender, "语音识别：" + transcript + "\n\n" + reply);
+      if (travelResult != null) sendTravelArtifacts(client, sender, travelResult);
       memory.addTurn(sender, "[语音] " + transcript, reply);
-      logRoute(sender, "voice", plannedReply.decision());
+      logRoute(sender, "voice");
 
       QwenTtsClient.Audio generated = ttsClient.synthesize(textForSpeech(reply));
       byte[] mp3 = audioConverter.toMp3(generated);
@@ -259,22 +314,46 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
     }
   }
 
-  private GeneratedReply generateReply(String sender, String userMessage) throws Exception {
-    MessageRoutePlanner.Decision decision = routePlanner.plan(userMessage);
-    if (decision.type() == RouteType.SKILL) {
-      return new GeneratedReply(decision.skill().execute(userMessage), decision);
-    }
+  private String generateReply(String sender, String userMessage) throws Exception {
     String unavailableReply = unavailableLlmReply(config);
     if (unavailableReply != null) {
-      return new GeneratedReply(unavailableReply, decision);
+      return unavailableReply;
     }
-    String modelInput =
-        decision.type() == RouteType.RAG
-            ? RagPromptBuilder.enhance(userMessage, decision.ragHits())
-            : userMessage;
-    String reply =
-        qwenClient.chatWithTools(memory.getRecentTurns(sender), modelInput, toolRegistry).answer();
-    return new GeneratedReply(reply, decision);
+    List<InMemoryTravelVectorStore.Hit> travelHits = travelRagService.retrieve(userMessage);
+    String modelInput = TravelRagService.enhancePrompt(userMessage, travelHits);
+    return qwenClient
+        .chatWithTools(memory.getRecentTurns(sender), modelInput, toolRegistry)
+        .answer();
+  }
+
+  private void storeTravelResult(
+      String sender, String travelGoal, TravelAgentService.Result result) {
+    if (result.plan() != null) {
+      travelTasks.complete(sender, result.plan().brief());
+      return;
+    }
+    switch (result.missingInput()) {
+      case ORIGIN -> travelTasks.progress(sender, travelGoal, "等待补充出发地");
+      case DESTINATION -> travelTasks.progress(sender, travelGoal, "等待补充目的地");
+      case NONE -> travelTasks.progress(sender, travelGoal, "执行未完成");
+    }
+  }
+
+  private void sendTravelArtifacts(
+      ILinkClient client, String sender, TravelAgentService.Result result) throws Exception {
+    if (result.markdownDocument() == null) return;
+    client.sendFile(
+        sender,
+        result.markdownDocument().getBytes(StandardCharsets.UTF_8),
+        result.fileName(),
+        null);
+    try {
+      byte[] pdf = travelPdfRenderer.render(result.markdownDocument());
+      String pdfName = result.fileName().replaceFirst("\\.md$", ".pdf");
+      client.sendFile(sender, pdf, pdfName, null);
+    } catch (Exception e) {
+      log.warn("Unable to render travel PDF for userId={}: {}", sender, e.getMessage());
+    }
   }
 
   static String unavailableLlmReply(AppConfig config) {
@@ -294,19 +373,8 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
     return llmReplyEnabled ? null : disabledReply;
   }
 
-  private void logRoute(
-      String sender, String messageType, MessageRoutePlanner.Decision decision) {
-    if (decision == null) {
-      log.info("Sent {} reply to userId={}; route=CLEAR_MEMORY", messageType, sender);
-      return;
-    }
-    log.info(
-        "Sent {} reply to userId={}; route={}; skill={}; ragDocuments={}",
-        messageType,
-        sender,
-        decision.type(),
-        decision.skill() == null ? "-" : decision.skill().name(),
-        decision.ragHits().stream().map(hit -> hit.document().id()).toList());
+  private void logRoute(String sender, String messageType) {
+    log.info("Sent {} reply to userId={}; route=TOOLS_OR_LLM", messageType, sender);
   }
 
   private void sendFailure(String sender, String message) {
@@ -426,5 +494,4 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
 
   private record PendingImage(MessageItem item, ScheduledFuture<?> flushTask) {}
 
-  private record GeneratedReply(String text, MessageRoutePlanner.Decision decision) {}
 }

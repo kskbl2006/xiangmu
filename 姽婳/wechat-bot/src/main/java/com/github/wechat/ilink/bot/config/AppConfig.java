@@ -68,6 +68,31 @@ public final class AppConfig {
     return value("QWEN_TTS_VOICE", "Cherry", loadLocalProperties());
   }
 
+  public String getQwenEmbeddingModel() {
+    return value("QWEN_EMBEDDING_MODEL", "qwen3.7-text-embedding", loadLocalProperties());
+  }
+
+  public int getQwenEmbeddingDimension() {
+    return intValue("QWEN_EMBEDDING_DIMENSION", 256, 256, 2_560);
+  }
+
+  public boolean isTravelRagEnabled() {
+    return Boolean.parseBoolean(value("TRAVEL_RAG_ENABLED", "true", loadLocalProperties()));
+  }
+
+  public int getTravelRagTopK() {
+    return intValue("TRAVEL_RAG_TOP_K", 4, 1, 8);
+  }
+
+  public double getTravelRagMinScore() {
+    String configured = value("TRAVEL_RAG_MIN_SCORE", "0.35", loadLocalProperties());
+    try {
+      return Math.max(-1.0, Math.min(1.0, Double.parseDouble(configured)));
+    } catch (NumberFormatException e) {
+      return 0.35;
+    }
+  }
+
   public String getSeniverseApiBaseUrl() {
     return value(
         "SENIVERSE_API_BASE_URL", "https://api.seniverse.com/v3", loadLocalProperties());
@@ -87,11 +112,58 @@ public final class AppConfig {
   }
 
   public boolean hasWeatherProvider() {
-    return hasSeniverseApiKey();
+    return true;
+  }
+
+  public String getOpenMeteoGeocodingUrl() {
+    return value(
+        "OPEN_METEO_GEOCODING_URL",
+        "https://geocoding-api.open-meteo.com/v1/search",
+        loadLocalProperties());
+  }
+
+  public String getOpenMeteoForecastUrl() {
+    return value(
+        "OPEN_METEO_FORECAST_URL",
+        "https://api.open-meteo.com/v1/forecast",
+        loadLocalProperties());
+  }
+
+  public boolean hasBaiduMapApiKey() {
+    String key = getBaiduMapApiKey();
+    return key != null && !key.isBlank();
+  }
+
+  public String requireBaiduMapApiKey() {
+    String key = getBaiduMapApiKey();
+    if (key == null || key.isBlank()) {
+      throw new IllegalStateException("BAIDU_MAP_AK is required for Baidu Map queries");
+    }
+    return key;
+  }
+
+  public String getBaiduMapBaseUrl() {
+    return value("BAIDU_MAP_BASE_URL", "https://api.map.baidu.com", loadLocalProperties());
+  }
+
+  public int getBaiduMapMinimumIntervalMillis() {
+    return intValue("BAIDU_MAP_MIN_INTERVAL_MS", 600, 0, 5_000);
+  }
+
+  public int getBaiduMapMaxPoiQueries() {
+    return intValue("BAIDU_MAP_MAX_POI_QUERIES", 8, 0, 21);
+  }
+
+  public String getTravelPdfFontPath() {
+    return value("TRAVEL_PDF_FONT_PATH", "", loadLocalProperties());
   }
 
   private String getSeniverseApiKey() {
     return value("SENIVERSE_API_KEY", null, loadLocalProperties());
+  }
+
+  private String getBaiduMapApiKey() {
+    return value("BAIDU_MAP_AK", null, loadLocalProperties());
   }
 
   public boolean isWeChatAutoReplyEnabled() {
@@ -121,19 +193,6 @@ public final class AppConfig {
         loadLocalProperties());
   }
 
-  public boolean isRagEnabled() {
-    return Boolean.parseBoolean(value("RAG_ENABLED", "true", loadLocalProperties()));
-  }
-
-  public int getRagTopK() {
-    String configured = value("RAG_TOP_K", "2", loadLocalProperties());
-    try {
-      return Math.max(1, Math.min(5, Integer.parseInt(configured)));
-    } catch (NumberFormatException e) {
-      return 2;
-    }
-  }
-
   private static String value(String name, String defaultValue, Properties localProperties) {
     String value = System.getenv(name);
     if (value != null && !value.trim().isEmpty()) {
@@ -144,6 +203,15 @@ public final class AppConfig {
       return localValue.trim();
     }
     return defaultValue;
+  }
+
+  private static int intValue(String name, int defaultValue, int min, int max) {
+    String configured = value(name, Integer.toString(defaultValue), loadLocalProperties());
+    try {
+      return Math.max(min, Math.min(max, Integer.parseInt(configured)));
+    } catch (NumberFormatException e) {
+      return defaultValue;
+    }
   }
 
   private static Properties loadLocalProperties() {
