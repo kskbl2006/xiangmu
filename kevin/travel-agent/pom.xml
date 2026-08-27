@@ -13,7 +13,7 @@
     <description>智能旅行规划助手 Agent（Java 版）：一句话需求 → NLU 解析 → DAG 并行调度 → 天气/RAG/预算/行程/校验 → 《旅行方案》md+docx</description>
 
     <properties>
-        <maven.compiler.release>17</maven.compiler.release>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <jackson.version>2.17.2</jackson.version>
         <junit.version>6.0.3</junit.version>
@@ -44,7 +44,7 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.13.0</version>
                 <configuration>
-                    <release>17</release>
+                    <release>21</release>
                 </configuration>
             </plugin>
             <plugin>

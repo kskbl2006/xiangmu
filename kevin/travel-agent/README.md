@@ -4,7 +4,7 @@
 Agent 自主拆解子任务、调用多种工具（天气 API / RAG 知识库 / 预算测算 / 行程编排 / 文档生成 Skill），
 自动校验冲突并修复，最终产出一份结构化、可直接使用的《旅行方案》文档。
 
-技术栈：Java 17 + Maven + Jackson；HTTP 与 Web 控制台均用 JDK 内置能力（`java.net.http.HttpClient`、
+技术栈：Java 21 + Maven + Jackson；HTTP 与 Web 控制台均用 JDK 内置能力（`java.net.http.HttpClient`、
 `com.sun.net.httpserver.HttpServer`、`java.util.zip`），离线可完整跑通闭环（真实 API + Mock 双兜底）。
 
 ## 快速开始
@@ -107,7 +107,7 @@ mvn test
 
 ```
 travel-agent/
-├── pom.xml                       # Maven（Java 17 + Jackson + JUnit5 + shade fat-jar）
+├── pom.xml                       # Maven（Java 21 + Jackson + JUnit5 + shade fat-jar）
 ├── src/main/java/com/travel/agent/
 │   ├── Main.java                 # CLI 入口
 │   ├── Bench.java / Demo.java   # 性能基准 / 验收演示

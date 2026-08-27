@@ -9,7 +9,7 @@ if not exist target\travel-agent.jar (
   call mvn -DskipTests package
   if errorlevel 1 (
     echo.
-    echo 构建失败，请检查 Maven/JDK 环境（需 JDK 17+）。可手动执行：mvn -DskipTests package
+    echo 构建失败，请检查 Maven/JDK 环境（需 JDK 21+）。可手动执行：mvn -DskipTests package
     pause
     exit /b 1
   )
