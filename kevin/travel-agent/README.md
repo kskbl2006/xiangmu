@@ -12,11 +12,14 @@ Agent 自主拆解子任务、调用多种工具（天气 API / RAG 知识库 / 
 python main.py "北京出发去三亚5天，预算5000元，2大1小"   # 一句话 → 完整方案
 python main.py --status                                 # 检查完成情况：所有运行总览（步骤数/方案是否生成）
 python main.py --status <run_id>                        # 某次运行详情：逐步✔/…、方案路径、自检修复与风险
-python main.py --list-runs                              # 查看历史运行
+python web.py                                           # Web 控制台：实时进度/方案预览/文档下载（127.0.0.1:8765）
+python bench.py                                         # 性能与 token 基准（冷/热启动、串行/并行对比）
+python demo.py                                          # 验收演示：5 大特性逐步演示（--auto 自动连跑）
+start.bat                                               # Windows 一键演示
 ```
 
 产出：`workspace/runs/<run_id>/旅行方案_三亚5日_<run_id>.md` + 同名 `.docx`（纯标准库 OOXML 导出，Word/WPS 可直接打开）
-（含需求概览 / 逐日天气 / 每日行程表 / 预算明细 / 自检与自动修复记录 / 运行统计）
+（含需求概览 / 逐日天气 / 每日行程表（含高德导航链接）/ 预算明细 / 自检与自动修复记录 / 质量自评 / 运行统计）
 
 **验收演示**：`python demo.py`（交互逐步演示 5 大特性）或 `python demo.py --auto`（自动连跑）
 

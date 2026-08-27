@@ -64,6 +64,7 @@ def _p(text, style=None, indent=False):
         ppr += '<w:ind w:left="480"/>'
     if ppr:
         ppr = "<w:pPr>%s</w:pPr>" % ppr
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)   # md 链接仅保留文字
     text = escape(re.sub(r"\*\*(.+?)\*\*", r"\1", text))  # 去掉加粗标记保留文字
     return '<w:p>%s<w:r><w:t xml:space="preserve">%s</w:t></w:r></w:p>' % (ppr, text)
 

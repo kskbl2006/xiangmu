@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from urllib.parse import quote
 
 from config import RUNS_DIR
 from tools.base import tool
+
+
+def _map_link(dest: str, name: str) -> str:
+    return "https://uri.amap.com/search?keyword=" + quote("%s %s" % (dest, name))
 
 
 def _table(headers, rows):
@@ -64,7 +69,9 @@ class ReportTool(object):
             L.append("### D%d %s（%s）%s %s" % (d["index"], d["date"], d["weekday"], d["cond"], d["temp"]))
             L.append("")
             L.append(_table(["时间", "安排", "类型", "费用(全队)", "说明"],
-                            [(it["time"], it["name"], it["type"], "%d元" % it["cost"] if it["cost"] else "免费", it["note"])
+                            [(it["time"], it["name"], it["type"], "%d元" % it["cost"] if it["cost"] else "免费",
+                              (it["note"] + " [导航](%s)" % _map_link(req["destination"], it["name"]))
+                              if it["kind"] == "景点" else it["note"])
                              for it in d["items"]]))
             L.append("")
             if d["tip"]:
@@ -106,16 +113,29 @@ class ReportTool(object):
             L.append("- ✅ 全部检查通过：日程完整、无雨天户外冲突、预算可控")
         L.append("")
 
-        # 六、注意事项
-        L.append("## 六、注意事项")
+        # 五·二、质量自评
+        q = vd.get("quality") or {}
+        if q:
+            L.append("## 六、方案质量自评（Agent 自评）")
+            L.append("")
+            L.append("**总分：%d / 100**" % q["score"])
+            L.append("")
+            L.append(_table(["维度", "得分率", "权重", "明细"],
+                            [("日程覆盖", "%d%%" % q["coverage"]["value"], str(q["coverage"]["weight"]), q["coverage"]["detail"]),
+                             ("雨天安全", "%d%%" % q["rain_safety"]["value"], str(q["rain_safety"]["weight"]), q["rain_safety"]["detail"]),
+                             ("预算达成", "%d%%" % q["budget_fit"]["value"], str(q["budget_fit"]["weight"]), q["budget_fit"]["detail"])]))
+            L.append("")
+
+        # 七、注意事项
+        L.append("## 七、注意事项")
         L.append("")
         L.extend(["- " + t for t in poi["tips"]])
         L.append("- 出行前请再次核对天气与票务信息；儿童门票、景区预约政策以官方为准。")
         L.append("")
 
-        # 七、运行统计
+        # 八、运行统计
         sec = stats["task_seconds"]
-        L.append("## 七、运行统计（Agent 过程可观测）")
+        L.append("## 八、运行统计（Agent 过程可观测）")
         L.append("")
         L.append(_table(["子任务", "耗时(s)"],
                         [(name, "%.2f" % sec[name]) for name in sorted(sec)] or [("-", "-")]))

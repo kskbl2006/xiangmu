@@ -111,8 +111,10 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(report.get("docx_path") and os.path.exists(report["docx_path"]))
         with open(path, encoding="utf-8") as f:
             content = f.read()
-        for section in ("需求概览", "出行期间天气", "每日行程", "预算明细", "自检与自动修复", "运行统计"):
+        for section in ("需求概览", "出行期间天气", "每日行程", "预算明细", "自检与自动修复",
+                        "质量自评", "注意事项", "运行统计"):
             self.assertIn(section, content)
+        self.assertIn("导航](https://", content)           # 景点带地图导航链接
         self.assertIn("三亚", content)
         for task in ("nlu", "weather", "poi", "budget", "itinerary", "validate", "report"):
             self.assertIn(task, agent.executed)

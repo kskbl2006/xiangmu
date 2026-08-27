@@ -130,8 +130,33 @@ class ValidateTool(object):
         itin["tickets_total"] = tickets_now()
 
         ok = not issues
+
+        # 质量自评（Agent 自评，写入方案文档）：日程覆盖40 + 雨天安全30 + 预算达成30
+        total_days = len(itin["days"])
+
+        def day_outdoor(d):
+            return [it for it in d["items"] if it["kind"] == "景点"
+                    and next((a["place"] for a in pool if a["name"] == it["name"]), "户外") == "户外"]
+
+        covered = sum(1 for d in itin["days"] if any(it["kind"] == "景点" for it in d["items"]))
+        rainy_days = [d for d in itin["days"] if _is_rainy(d)]
+        safe_rain = sum(1 for d in rainy_days if not day_outdoor(d))
+        cov = covered / max(total_days, 1)
+        rain_s = (safe_rain / len(rainy_days)) if rainy_days else 1.0
+        budget_s = 1.0 if actual <= cap else max(0.0, cap / max(actual, 1))
+        score = int(cov * 40 + rain_s * 30 + budget_s * 30)
+
         return {
             "ok": ok, "issues": issues, "fixes": fixes,
             "actual_total": actual, "cap": cap,
+            "quality": {
+                "score": score,
+                "coverage": {"value": round(cov * 100), "weight": 40,
+                             "detail": "%d/%d 天有景点安排" % (covered, total_days)},
+                "rain_safety": {"value": round(rain_s * 100), "weight": 30,
+                                "detail": ("%d/%d 个雨天无户外暴露" % (safe_rain, len(rainy_days))) if rainy_days else "无雨天"},
+                "budget_fit": {"value": round(budget_s * 100), "weight": 30,
+                               "detail": "实际 %d 元 / 预算 %d 元" % (actual, cap)},
+            },
             "itinerary": itin, "hotel": hotel, "budget": budget,
         }
