@@ -15,8 +15,10 @@ python main.py --status <run_id>                        # 某次运行详情：�
 python main.py --list-runs                              # 查看历史运行
 ```
 
-产出：`workspace/runs/<run_id>/旅行方案_三亚5日_<run_id>.md`
+产出：`workspace/runs/<run_id>/旅行方案_三亚5日_<run_id>.md` + 同名 `.docx`（纯标准库 OOXML 导出，Word/WPS 可直接打开）
 （含需求概览 / 逐日天气 / 每日行程表 / 预算明细 / 自检与自动修复记录 / 运行统计）
+
+**验收演示**：`python demo.py`（交互逐步演示 5 大特性）或 `python demo.py --auto`（自动连跑）
 
 ## 四个进阶特性（26-27 日任务）及演示方法
 
@@ -60,7 +62,7 @@ python main.py --schedule "10m" "..." --max-runs 2                          # �
 | 工具层 | `tools/`（weather/poi/budget/itinerary） | 统一 Tool Registry + 磁盘缓存；天气走 Open-Meteo，景点走 RAG |
 | 输出层 | `tools/validate.py` + `tools/report.py` | 冲突检查（预算超支/雨天户外）+ 自动修复；方案文档渲染 Skill |
 | 工程支撑 | `core/llm.py` + `core/scheduler.py` + `rag/kb.py` | LLM 引擎（真实 API+Mock）、TokenMeter、定时调度、BM25-lite 检索 |
-| 数据源 | `knowledge/*.md` + Mock | 5 城旅行知识库；未覆盖城市自动降级通用推荐 |
+| 数据源 | `knowledge/*.md` + Mock | 10 城旅行知识库（三亚/上海/北京/成都/杭州/西安/重庆/广州/南京/苏州）；未覆盖城市自动降级通用推荐 |
 
 ## 子任务链路（7 步）
 

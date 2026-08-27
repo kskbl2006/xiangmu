@@ -127,4 +127,13 @@ class ReportTool(object):
         fname = "旅行方案_%s%d日_%s.md" % (req["destination"], req["days"], stats["run_id"])
         path = RUNS_DIR / stats["run_id"] / fname
         path.write_text("\n".join(L), encoding="utf-8")
-        return {"path": str(path), "filename": fname}
+        # 同步导出 docx（纯标准库实现，本地渲染 0 token；失败不影响 md 交付）
+        docx_path = ""
+        try:
+            from tools.docx_export import md_to_docx
+            docx_path = str(path.with_suffix(".docx"))
+            md_to_docx("\n".join(L), docx_path)
+        except Exception as e:  # noqa: BLE001
+            docx_path = ""
+            L.append("<!-- docx 导出失败: %s -->" % e)
+        return {"path": str(path), "filename": fname, "docx_path": docx_path}

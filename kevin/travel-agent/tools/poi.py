@@ -42,8 +42,9 @@ GENERIC_HOTELS = [
 ]
 
 
-CITY_FILES = {"三亚": "sanya", "上海": "shanghai", "北京": "beijing",
-              "成都": "chengdu", "杭州": "hangzhou"}
+CITY_FILES = {"三亚": "sanya", "上海": "shanghai", "北京": "beijing", "成都": "chengdu",
+              "杭州": "hangzhou", "西安": "xian", "重庆": "chongqing", "广州": "guangzhou",
+              "南京": "nanjing", "苏州": "suzhou"}
 
 
 def load_kb(destination: str):

@@ -45,6 +45,12 @@ class TestRAG(unittest.TestCase):
         self.assertGreaterEqual(len(kb["attractions"]), 8)
         self.assertEqual(len(kb["hotels"]), 3)
 
+    def test_kb_new_cities(self):
+        for city in ("西安", "重庆", "广州", "南京", "苏州"):
+            kb = load_kb(city)
+            self.assertIsNotNone(kb, city)
+            self.assertGreaterEqual(len(kb["attractions"]), 8, city)
+
     def test_relevance(self):
         self.assertGreater(relevance("海滩 游泳 潜水", "亚龙湾 海滩 沙质 水质清澈 游泳"),
                            relevance("海滩 游泳 潜水", "博物馆 历史文化 展览"))
@@ -68,11 +74,41 @@ class TestBudget(unittest.TestCase):
         self.assertTrue(out["warnings"])
 
 
+class TestDocx(unittest.TestCase):
+    def test_md_to_docx(self):
+        import tempfile
+        import zipfile
+        from xml.dom import minidom
+        from tools.docx_export import md_to_docx
+
+        md = "# 测试标题\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n- 列表项\n\n> 引用文字\n\n普通段落 **加粗** 内容\n"
+        out = os.path.join(tempfile.gettempdir(), "travel_agent_test.docx")
+        md_to_docx(md, out)
+        try:
+            with zipfile.ZipFile(out) as z:
+                names = z.namelist()
+                self.assertIn("word/document.xml", names)
+                self.assertIn("word/styles.xml", names)
+                xml = z.read("word/document.xml").decode("utf-8")
+            minidom.parseString(xml)               # XML 结构合法
+            self.assertIn("测试标题", xml)
+            self.assertIn("列表项", xml)
+            self.assertIn("引用文字", xml)
+            self.assertIn("加粗", xml)
+            self.assertNotIn("**", xml)             # 加粗标记已剥离
+            self.assertIn("<w:tbl>", xml)           # 表格已生成
+        finally:
+            if os.path.exists(out):
+                os.remove(out)
+
+
 class TestEndToEnd(unittest.TestCase):
     def test_full_run(self):
         agent = TravelAgent(GOAL, run_id="test_full")
         path = agent.run()
         self.assertTrue(path and os.path.exists(path))
+        report = agent.ckpt.result("report")
+        self.assertTrue(report.get("docx_path") and os.path.exists(report["docx_path"]))
         with open(path, encoding="utf-8") as f:
             content = f.read()
         for section in ("需求概览", "出行期间天气", "每日行程", "预算明细", "自检与自动修复", "运行统计"):
