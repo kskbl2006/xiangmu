@@ -1,5 +1,7 @@
-__pycache__/
-*.pyc
+target/
+dependency-reduced-pom.xml
+*.iml
+.idea/
 workspace/runs/
 workspace/cache/
 workspace/schedule.log
