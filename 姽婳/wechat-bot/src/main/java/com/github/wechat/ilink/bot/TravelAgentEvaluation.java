@@ -10,6 +10,8 @@ import com.github.wechat.ilink.bot.agent.TravelPlanReviewSkill;
 import com.github.wechat.ilink.bot.config.AppConfig;
 import com.github.wechat.ilink.bot.maps.BaiduMapClient;
 import com.github.wechat.ilink.bot.maps.TravelMapService;
+import com.github.wechat.ilink.bot.maps.JuheRailClient;
+import com.github.wechat.ilink.bot.maps.TravelEvidenceService;
 import com.github.wechat.ilink.bot.travelrag.TravelRagService;
 import com.github.wechat.ilink.bot.weather.OpenMeteoWeather;
 import java.util.Arrays;
@@ -17,7 +19,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Real-provider business evaluation for the supported travel MVP scope. */
+/** 针对旅行 MVP 的真实服务业务评估。 */
 public final class TravelAgentEvaluation {
   private TravelAgentEvaluation() {}
 
@@ -28,6 +30,8 @@ public final class TravelAgentEvaluation {
     OpenMeteoWeather weather = new OpenMeteoWeather(config);
     TravelMapService mapService =
         new TravelMapService(new BaiduMapClient(config), config.getBaiduMapMaxPoiQueries());
+    TravelEvidenceService evidenceService =
+        new TravelEvidenceService(mapService, new JuheRailClient(config));
     com.github.wechat.ilink.bot.llm.QwenClient qwenClient =
         new com.github.wechat.ilink.bot.llm.QwenClient(config);
     TravelAgentService agent =
@@ -38,7 +42,7 @@ public final class TravelAgentEvaluation {
             rag::retrieveAttractionsForPlanning,
             weather::forecast,
             mapEnabled
-                ? mapService::enrich
+                ? evidenceService
                 : (brief, plan) ->
                     com.github.wechat.ilink.bot.agent.TravelMapData.disabled(
                         brief.destination()));

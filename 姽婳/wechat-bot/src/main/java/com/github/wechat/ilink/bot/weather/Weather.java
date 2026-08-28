@@ -20,7 +20,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Retrieves current conditions for Chinese cities from Seniverse. */
+/** 从心知天气获取中国城市实况。 */
 public final class Weather {
   private static final Pattern CITY_PREFIX = Pattern.compile("^(.+?市)");
   private static final Pattern ADMINISTRATIVE_SUFFIX =

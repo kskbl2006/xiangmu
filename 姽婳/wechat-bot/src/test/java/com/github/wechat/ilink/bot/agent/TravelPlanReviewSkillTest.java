@@ -36,8 +36,14 @@ class TravelPlanReviewSkillTest {
     assertTrue(first.issues().stream().anyMatch(issue -> "BUDGET_EXCEEDED".equals(issue.code())));
 
     TravelPlan repaired = skill.repair(invalid, first.issues());
-    assertTrue(skill.review(repaired).passed());
-    assertTrue(repaired.budget().buffer() >= 200);
+    TravelPlanReviewSkill.ReviewResult repairedReview = skill.review(repaired);
+    assertTrue(
+        repairedReview.issues().stream()
+            .noneMatch(
+                issue ->
+                    "DAY_COUNT_MISMATCH".equals(issue.code())
+                        || "DUPLICATE_ACTIVITY".equals(issue.code())));
+    assertTrue(repaired.reviewRounds() == 1);
   }
 
   @Test

@@ -6,7 +6,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
-/** Validates the object/string/number/boolean subset needed by the current tool schemas. */
+/** 校验当前工具所需的对象、字符串、数字和布尔类型。 */
 public final class JsonSchemaValidator {
   private JsonSchemaValidator() {}
 

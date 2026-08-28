@@ -3,7 +3,7 @@ package com.github.wechat.ilink.bot.agent;
 import java.time.LocalDate;
 import java.util.List;
 
-/** Normalized high-level goal consumed by the travel planning workflow. */
+/** 供旅行规划流程使用的标准化目标。 */
 public record TravelBrief(
     String origin,
     String destination,

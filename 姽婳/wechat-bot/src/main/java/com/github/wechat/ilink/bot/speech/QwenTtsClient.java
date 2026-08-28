@@ -14,7 +14,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Synchronous Qwen3-TTS client returning generated audio bytes. */
+/** 同步调用千问语音合成并返回音频数据。 */
 public final class QwenTtsClient {
   public record Audio(byte[] bytes, String format) {}
 

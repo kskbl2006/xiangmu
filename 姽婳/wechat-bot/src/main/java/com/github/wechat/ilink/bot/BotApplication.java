@@ -4,7 +4,7 @@ import com.github.wechat.ilink.bot.config.AppConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Application entry point. WeChat event routing will be added after SDK login is verified. */
+/** 应用入口；SDK 登录验证后接入微信事件路由。 */
 public final class BotApplication {
   private static final Logger log = LoggerFactory.getLogger(BotApplication.class);
 

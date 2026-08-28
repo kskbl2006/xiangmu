@@ -5,7 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
-/** Converts generated audio to a widely playable MP3 attachment using the local FFmpeg binary. */
+/** 使用本地 FFmpeg 将生成音频转换为通用 MP3 附件。 */
 public final class AudioConverter {
   private final Path workDirectory;
 

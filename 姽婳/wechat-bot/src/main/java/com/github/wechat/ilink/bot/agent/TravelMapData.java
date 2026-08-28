@@ -5,8 +5,9 @@ import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
-/** Dynamic route and POI snapshots queried at plan-generation time. */
+/** 生成方案时查询的动态路线和 POI 快照。 */
 public record TravelMapData(
     boolean enabled,
     String origin,
@@ -39,20 +40,53 @@ public record TravelMapData(
     return poiByTitle.get(title);
   }
 
-  /** Lowest non-zero outbound plus return fare, multiplied by traveler count. */
+  public Optional<RouteOption> recommendedOutbound() {
+    return selectRoute(outboundRoutes, true);
+  }
+
+  public Optional<RouteOption> recommendedReturn() {
+    return selectRoute(returnRoutes, false);
+  }
+
+  /** 推荐往返组合的总票价，已按人数计算。 */
   public int referenceRoundTripCost(int travelers) {
-    double outbound = minimumPositiveFare(outboundRoutes);
-    double inbound = minimumPositiveFare(returnRoutes);
+    double outbound = recommendedOutbound().map(RouteOption::referencePriceYuan).orElse(0.0);
+    double inbound = recommendedReturn().map(RouteOption::referencePriceYuan).orElse(0.0);
     if (outbound <= 0 || inbound <= 0) return 0;
     return (int) Math.ceil((outbound + inbound) * Math.max(1, travelers));
   }
 
-  private static double minimumPositiveFare(List<RouteOption> routes) {
-    return routes.stream()
-        .mapToDouble(RouteOption::referencePriceYuan)
-        .filter(value -> value > 0)
-        .min()
-        .orElse(0);
+  private static Optional<RouteOption> selectRoute(List<RouteOption> routes, boolean outbound) {
+    if (routes == null || routes.isEmpty()) return Optional.empty();
+    boolean hasPricedRoute = routes.stream().anyMatch(route -> route.referencePriceYuan() > 0);
+    List<RouteOption> candidates =
+        hasPricedRoute
+            ? routes.stream().filter(route -> route.referencePriceYuan() > 0).toList()
+            : routes;
+    double maxPrice = candidates.stream().mapToDouble(RouteOption::referencePriceYuan).max().orElse(1);
+    int maxDuration = candidates.stream().mapToInt(RouteOption::durationMinutes).max().orElse(1);
+    return candidates.stream()
+        .min(
+            java.util.Comparator.comparingDouble(
+                route -> {
+                  double price =
+                      route.referencePriceYuan() > 0
+                          ? route.referencePriceYuan() / Math.max(1, maxPrice)
+                          : 1;
+                  double duration =
+                      route.durationMinutes() > 0
+                          ? route.durationMinutes() / (double) Math.max(1, maxDuration)
+                          : 1;
+                  int time = parseMinutes(outbound ? route.arrivalTime() : route.departureTime());
+                  double schedule =
+                      time < 0 ? 0.5 : outbound ? time / 1_440.0 : (1_440 - time) / 1_440.0;
+                  return price * 0.50 + duration * 0.25 + schedule * 0.25;
+                }));
+  }
+
+  static int parseMinutes(String value) {
+    if (value == null || !value.matches("(?:[01]\\d|2[0-3]):[0-5]\\d")) return -1;
+    return Integer.parseInt(value.substring(0, 2)) * 60 + Integer.parseInt(value.substring(3));
   }
 
   public record RouteOption(
@@ -65,7 +99,10 @@ public record TravelMapData(
       String arrivalTime,
       int durationMinutes,
       double referencePriceYuan,
-      String bookingUrl) {
+      String bookingUrl,
+      String source,
+      Instant queriedAt,
+      double confidence) {
     public RouteOption {
       mode = blankTo(mode, "公共交通");
       serviceName = blankTo(serviceName, mode);
@@ -74,8 +111,38 @@ public record TravelMapData(
       departureTime = blankTo(departureTime, "待确认");
       arrivalTime = blankTo(arrivalTime, "待确认");
       bookingUrl = bookingUrl == null ? "" : bookingUrl.trim();
+      source = blankTo(source, "legacy-provider");
+      queriedAt = queriedAt == null ? Instant.now() : queriedAt;
+      confidence = Math.max(0, Math.min(1, confidence));
       durationMinutes = Math.max(0, durationMinutes);
       referencePriceYuan = Math.max(0, referencePriceYuan);
+    }
+
+    public RouteOption(
+        LocalDate date,
+        String mode,
+        String serviceName,
+        String departureStation,
+        String arrivalStation,
+        String departureTime,
+        String arrivalTime,
+        int durationMinutes,
+        double referencePriceYuan,
+        String bookingUrl) {
+      this(
+          date,
+          mode,
+          serviceName,
+          departureStation,
+          arrivalStation,
+          departureTime,
+          arrivalTime,
+          durationMinutes,
+          referencePriceYuan,
+          bookingUrl,
+          "legacy-provider",
+          Instant.now(),
+          0.5);
     }
   }
 

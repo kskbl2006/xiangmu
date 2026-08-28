@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.wechat.ilink.bot.agent.TravelForecast;
 import com.github.wechat.ilink.bot.config.AppConfig;
+import com.github.wechat.ilink.bot.resilience.ProviderCircuitBreaker;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -21,7 +22,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Open-Meteo provider for trip-date-aligned daily forecasts. */
+/** 提供与旅行日期对应的 Open-Meteo 每日预报。 */
 public final class OpenMeteoWeather {
   private static final int MAX_FORECAST_DAYS = 16;
   private static final long CACHE_MILLIS = Duration.ofMinutes(30).toMillis();
@@ -51,6 +52,8 @@ public final class OpenMeteoWeather {
   private final OkHttpClient httpClient =
       new OkHttpClient.Builder().callTimeout(Duration.ofSeconds(20)).build();
   private final ConcurrentHashMap<String, CachedForecast> cache = new ConcurrentHashMap<>();
+  private final ProviderCircuitBreaker circuitBreaker =
+      new ProviderCircuitBreaker(3, Duration.ofMinutes(5), java.time.Clock.systemUTC());
 
   public OpenMeteoWeather(AppConfig config) {
     this.config = config;
@@ -143,15 +146,34 @@ public final class OpenMeteoWeather {
   }
 
   private String get(HttpUrl url) throws IOException {
-    Request request = new Request.Builder().url(url).get().build();
-    try (Response response = httpClient.newCall(request).execute()) {
-      ResponseBody responseBody = response.body();
-      String body = responseBody == null ? "" : responseBody.string();
-      if (!response.isSuccessful()) {
-        throw new IOException("Open-Meteo请求失败：HTTP " + response.code());
-      }
-      return body;
+    if (!circuitBreaker.allowRequest()) {
+      throw new IOException("Open-Meteo服务暂时熔断，已降级为天气不可查询");
     }
+    IOException lastFailure = null;
+    for (int attempt = 1; attempt <= 2; attempt++) {
+      Request request = new Request.Builder().url(url).get().build();
+      try (Response response = httpClient.newCall(request).execute()) {
+        ResponseBody responseBody = response.body();
+        String body = responseBody == null ? "" : responseBody.string();
+        if (!response.isSuccessful()) {
+          throw new IOException("Open-Meteo请求失败：HTTP " + response.code());
+        }
+        circuitBreaker.recordSuccess();
+        return body;
+      } catch (IOException e) {
+        lastFailure = e;
+        if (attempt < 2) {
+          try {
+            Thread.sleep(200L);
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Open-Meteo重试被中断", interrupted);
+          }
+        }
+      }
+    }
+    circuitBreaker.recordFailure();
+    throw lastFailure == null ? new IOException("Open-Meteo请求失败") : lastFailure;
   }
 
   TravelForecast parseForecast(String body, String place, LocalDate startDate, int days)

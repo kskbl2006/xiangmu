@@ -24,13 +24,13 @@ import okhttp3.ResponseBody;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Minimal client for DashScope's OpenAI-compatible chat-completions endpoint. */
+/** 百炼兼容聊天接口的轻量客户端。 */
 public final class QwenClient {
   private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
   private static final Logger log = LoggerFactory.getLogger(QwenClient.class);
   private static final int MAX_TOOL_ROUNDS = 5;
 
-  /** Ordered audit entry for one local tool execution. Round is one-based. */
+  /** 单次本地工具执行记录，轮次从 1 开始。 */
   public record ToolExecution(
       int round,
       String callId,
@@ -99,7 +99,7 @@ public final class QwenClient {
     return execute(requestBody);
   }
 
-  /** Requests a JSON object under a task-specific system instruction. */
+  /** 按任务系统指令请求 JSON 对象。 */
   public String chatJson(String systemInstruction, String userMessage) throws IOException {
     if (systemInstruction == null || systemInstruction.isBlank()) {
       throw new IllegalArgumentException("system instruction must not be blank");
@@ -239,7 +239,7 @@ public final class QwenClient {
         durationMillis);
   }
 
-  /** Uses the configured vision-capable Qwen model to describe an image and extract visible text. */
+  /** 使用已配置的千问视觉模型描述图片并提取文字。 */
   public String chatWithImage(byte[] imageBytes, String mimeType, String userPrompt) throws IOException {
     return chatWithImage(List.of(), imageBytes, mimeType, userPrompt);
   }

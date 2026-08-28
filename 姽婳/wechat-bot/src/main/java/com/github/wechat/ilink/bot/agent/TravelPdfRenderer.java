@@ -12,7 +12,7 @@ import org.commonmark.ext.gfm.tables.TablesExtension;
 import org.commonmark.parser.Parser;
 import org.commonmark.renderer.html.HtmlRenderer;
 
-/** Renders the travel Markdown artifact into a styled, searchable Chinese PDF. */
+/** 将旅行 Markdown 渲染为带样式且可搜索的中文 PDF。 */
 public final class TravelPdfRenderer {
   private static final List<Path> DEFAULT_FONTS =
       List.of(

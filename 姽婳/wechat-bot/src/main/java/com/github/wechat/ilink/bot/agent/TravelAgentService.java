@@ -16,7 +16,7 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Runs the travel MVP from one high-level goal through tools, Skills, review and delivery. */
+/** 将单个旅行目标依次经过工具、Skill、审校并生成成品。 */
 public final class TravelAgentService {
   private static final Logger log = LoggerFactory.getLogger(TravelAgentService.class);
   private static final int MAX_REVIEW_ROUNDS = 2;
@@ -31,17 +31,15 @@ public final class TravelAgentService {
     TravelForecast forecast(String city, java.time.LocalDate startDate, int days) throws Exception;
   }
 
-  @FunctionalInterface
-  public interface MapEnrichment {
-    TravelMapData enrich(TravelBrief brief, TravelPlan plan);
-  }
-
   private final TravelBriefSkill briefSkill;
   private final CnTripPlannerSkill plannerSkill;
   private final TravelPlanReviewSkill reviewSkill;
   private final KnowledgeSearch knowledgeSearch;
   private final WeatherLookup weatherLookup;
-  private final MapEnrichment mapEnrichment;
+  private final TravelEvidenceProvider evidenceProvider;
+  private final CandidateCollector candidateCollector;
+  private final TravelPlanningLoop planningLoop;
+  private final TravelCheckpointStore checkpointStore;
 
   public TravelAgentService(
       TravelBriefSkill briefSkill,
@@ -55,7 +53,8 @@ public final class TravelAgentService {
         reviewSkill,
         knowledgeSearch,
         weatherLookup,
-        (brief, plan) -> TravelMapData.disabled(brief.destination()));
+        TravelEvidenceProvider.disabled(),
+        TravelCheckpointStore.disabled());
   }
 
   public TravelAgentService(
@@ -64,13 +63,37 @@ public final class TravelAgentService {
       TravelPlanReviewSkill reviewSkill,
       KnowledgeSearch knowledgeSearch,
       WeatherLookup weatherLookup,
-      MapEnrichment mapEnrichment) {
+      TravelEvidenceProvider evidenceProvider) {
+    this(
+        briefSkill,
+        plannerSkill,
+        reviewSkill,
+        knowledgeSearch,
+        weatherLookup,
+        evidenceProvider,
+        TravelCheckpointStore.disabled());
+  }
+
+  public TravelAgentService(
+      TravelBriefSkill briefSkill,
+      CnTripPlannerSkill plannerSkill,
+      TravelPlanReviewSkill reviewSkill,
+      KnowledgeSearch knowledgeSearch,
+      WeatherLookup weatherLookup,
+      TravelEvidenceProvider evidenceProvider,
+      TravelCheckpointStore checkpointStore) {
     this.briefSkill = briefSkill;
     this.plannerSkill = plannerSkill;
     this.reviewSkill = reviewSkill;
     this.knowledgeSearch = knowledgeSearch;
     this.weatherLookup = weatherLookup;
-    this.mapEnrichment = mapEnrichment;
+    this.evidenceProvider = evidenceProvider;
+    this.checkpointStore =
+        checkpointStore == null ? TravelCheckpointStore.disabled() : checkpointStore;
+    this.candidateCollector = new CandidateCollector();
+    this.planningLoop =
+        new TravelPlanningLoop(
+            plannerSkill, reviewSkill, new DynamicBudgetEngine(), MAX_REVIEW_ROUNDS);
   }
 
   public boolean supports(String message) {
@@ -85,6 +108,7 @@ public final class TravelAgentService {
     long startedAt = System.nanoTime();
     Consumer<String> reporter = progress == null ? ignored -> {} : progress;
     TravelBrief brief = briefSkill.normalize(highLevelGoal);
+    PlanningContext context = new PlanningContext(highLevelGoal, brief);
     reporter.accept("需求已解析");
     if (!brief.supported()) {
       return new Result(
@@ -103,65 +127,44 @@ public final class TravelAgentService {
           MissingInput.ORIGIN);
     }
 
-    CompletableFuture<TravelForecast> forecastFuture;
-    CompletableFuture<List<InMemoryTravelVectorStore.Hit>> knowledgeFuture;
-    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      forecastFuture =
-          CompletableFuture.supplyAsync(() -> safeForecast(brief), executor);
-      knowledgeFuture =
-          CompletableFuture.supplyAsync(() -> safeKnowledgeSearch(highLevelGoal, brief), executor);
-      CompletableFuture.allOf(forecastFuture, knowledgeFuture).join();
+    TravelForecast forecast;
+    List<InMemoryTravelVectorStore.Hit> hits;
+    TravelMapData mapData;
+    String checkpointGoal = evidenceProvider.checkpointVariant() + "\u0000" + highLevelGoal;
+    java.util.Optional<TravelCheckpointStore.Evidence> restored = checkpointStore.find(checkpointGoal);
+    if (restored.isPresent()) {
+      forecast = restored.get().forecast();
+      hits = restored.get().hits();
+      mapData = restored.get().mapData();
+      reporter.accept("已从本地检查点恢复天气、知识与交通证据");
+    } else {
+      CompletableFuture<TravelForecast> forecastFuture;
+      CompletableFuture<List<InMemoryTravelVectorStore.Hit>> knowledgeFuture;
+      try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+        forecastFuture =
+            CompletableFuture.supplyAsync(() -> safeForecast(brief), executor);
+        knowledgeFuture =
+            CompletableFuture.supplyAsync(() -> safeKnowledgeSearch(highLevelGoal, brief), executor);
+        CompletableFuture.allOf(forecastFuture, knowledgeFuture).join();
+      }
+      forecast = forecastFuture.join();
+      hits = knowledgeFuture.join();
+      reporter.accept("天气与知识已并行查询");
+      List<PlaceCandidate> initialCandidates = candidateCollector.collect(hits);
+      mapData = evidenceProvider.collect(brief, initialCandidates);
+      checkpointStore.save(checkpointGoal, forecast, hits, mapData);
     }
-    TravelForecast forecast = forecastFuture.join();
-    List<InMemoryTravelVectorStore.Hit> hits = knowledgeFuture.join();
-    reporter.accept("天气与知识已并行查询");
-    TravelPlan plan = plannerSkill.build(brief, forecast, hits);
-    reporter.accept("行程已规划");
-    TravelMapData mapData = mapEnrichment.enrich(brief, plan);
-    reporter.accept("地图数据已补充");
-    int transportReference = mapData.referenceRoundTripCost(brief.travelers());
-    if (transportReference > 0) {
-      plan =
-          new TravelPlan(
-              plan.brief(),
-              plan.forecast(),
-              plan.mapData(),
-              plan.days(),
-              CnTripPlannerSkill.allocateBudget(
-                  Math.max(0, brief.budgetYuan() - transportReference)),
-              plan.generationMode(),
-              plan.executionSteps(),
-              plan.reviewRounds(),
-              plan.reviewIssues());
-    }
-    plan =
-        new TravelPlan(
-            plan.brief(),
-            plan.forecast(),
-            mapData,
-            plan.days(),
-            plan.budget(),
-            plan.generationMode(),
-            plan.executionSteps(),
-            plan.reviewRounds(),
-            plan.reviewIssues());
-
-    TravelPlanReviewSkill.ReviewResult review = reviewSkill.review(plan);
-    while (!review.passed() && plan.reviewRounds() < MAX_REVIEW_ROUNDS) {
-      plan = reviewSkill.repair(plan, review.issues());
-      review = reviewSkill.review(plan);
-    }
-    plan =
-        new TravelPlan(
-            plan.brief(),
-            plan.forecast(),
-            plan.mapData(),
-            plan.days(),
-            plan.budget(),
-            plan.generationMode(),
-            plan.executionSteps(),
-            plan.reviewRounds(),
-            review.issues());
+    List<PlaceCandidate> candidates = candidateCollector.collect(hits);
+    candidates = candidateCollector.mergeMapData(candidates, mapData);
+    List<InMemoryTravelVectorStore.Hit> eligibleHits =
+        candidateCollector.eligibleHits(hits, candidates);
+    context.evidence(forecast, eligibleHits, candidates, mapData);
+    reporter.accept("候选地点与交通证据已收集");
+    TravelPlanningLoop.Outcome outcome = planningLoop.run(context);
+    TravelPlan plan = outcome.plan();
+    TravelPlanReviewSkill.ReviewResult review = outcome.review();
+    TravelDataQuality.Report quality = TravelDataQuality.assess(plan, candidates, review);
+    reporter.accept("行程已完成规划、验证与修复闭环");
     reporter.accept("方案已审校");
     log.info(
         "Travel Agent completed: destination={}, days={}, skills=[{}, {}], reviewRounds={}, issues={}, elapsedMs={}",
@@ -172,6 +175,22 @@ public final class TravelAgentService {
         plan.reviewRounds(),
         plan.reviewIssues().size(),
         (System.nanoTime() - startedAt) / 1_000_000L);
+    log.info(
+        "Travel data quality: destination={}, score={}, grade={}, weather={}/{}, poi={}/{}, coordinates={}, openingHours={}, routes={}/2, pricedRoutes={}/2, cityLegs={}/{}, candidates={}",
+        brief.destination(),
+        quality.score(),
+        quality.grade(),
+        quality.weatherAvailable(),
+        quality.weatherTotal(),
+        quality.poiMatched(),
+        quality.activityTotal(),
+        quality.coordinatesAvailable(),
+        quality.openingHoursAvailable(),
+        quality.routeDirections(),
+        quality.pricedDirections(),
+        quality.cityLegsAvailable(),
+        quality.cityLegsExpected(),
+        quality.candidatesCollected());
     String notice =
         review.passed()
             ? brief.destination() + brief.days() + "天旅行方案已生成，请查收 Markdown 与 PDF 附件。"
@@ -272,11 +291,27 @@ public final class TravelAgentService {
       if (!day.mealSuggestion().isBlank()) {
         text.append("**用餐建议：** ").append(day.mealSuggestion()).append("\n");
       }
+      List<TravelPlan.TravelLeg> dayLegs =
+          plan.cityLegs().stream().filter(leg -> leg.day() == day.day()).toList();
+      if (!dayLegs.isEmpty()) {
+        text.append("\n### 当日地点间交通\n\n")
+            .append("| 路线 | 建议方式 | 参考距离 | 预计时间 | 参考费用 |\n")
+            .append("|---|---|---:|---:|---:|\n");
+        for (TravelPlan.TravelLeg leg : dayLegs) {
+          text.append("| ").append(markdownCell(leg.from())).append(" → ")
+              .append(markdownCell(leg.to())).append(" | ")
+              .append(markdownCell(leg.mode())).append(" | ")
+              .append(String.format(Locale.ROOT, "%.1f km", leg.distanceKm())).append(" | ")
+              .append(leg.durationMinutes()).append(" 分钟 | ")
+              .append(leg.costYuan()).append(" 元 |\n");
+        }
+        text.append("\n> 市内路段基于地点坐标进行保守估算，出发前请用地图软件确认实时路线。\n");
+      }
     }
     TravelPlan.Budget budget = plan.budget();
     int transportReference = plan.mapData().referenceRoundTripCost(brief.travelers());
     text.append("\n## 预算分配\n\n")
-        .append("| 类别 | 预算 |\n|---|---:|\n")
+        .append("| 类别 | 动态估算 |\n|---|---:|\n")
         .append(String.format(Locale.ROOT, "| 往返大交通（动态参考） | %d 元 |%n", transportReference))
         .append(String.format(Locale.ROOT, "| 住宿 | %d 元 |%n", budget.lodging()))
         .append(String.format(Locale.ROOT, "| 餐饮 | %d 元 |%n", budget.food()))
@@ -287,10 +322,11 @@ public final class TravelAgentService {
             String.format(
                 Locale.ROOT,
                 "| **预计总支出** | **%d 元** |%n",
-                budget.total() + transportReference));
+                budget.total() + transportReference))
+        .append(String.format(Locale.ROOT, "| **预算余量** | **%d 元** |%n", budget.remaining()));
     String transportNotice;
     if (transportReference > 0) {
-      transportNotice = "- 往返交通采用地图候选中的最低参考价，实际票价和余票请通过官方平台确认。\n";
+      transportNotice = "- 往返交通预算采用价格、耗时和首尾日可用时间综合选择的推荐组合，实际票价和余票请通过官方平台确认。\n";
     } else if (!plan.mapData().enabled()) {
       transportNotice = "- 当前未启用地图交通服务，往返交通请通过官方交通平台查询。\n";
     } else {
@@ -310,6 +346,17 @@ public final class TravelAgentService {
         text.append("- ").append(warning).append("。\n");
       }
     }
+    plan.mapData().poiByTitle().values().stream()
+        .map(TravelMapData.PoiSnapshot::queriedAt)
+        .max(java.util.Comparator.naturalOrder())
+        .ifPresent(
+            instant ->
+                text.append("- 景点地址、评分、开放时间和参考费用来自百度地图，数据查询时间：")
+                    .append(
+                        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                            .withZone(java.time.ZoneId.systemDefault())
+                            .format(instant))
+                    .append("。\n"));
     if (!plan.forecast().fullyAvailable()) {
       text.append("- 部分或全部行程日期超出当前天气预报范围，相关日期天气暂不可查询；方案已按常规出行条件编排。\n");
     }
@@ -347,7 +394,7 @@ public final class TravelAgentService {
 
     text.append("\n## 往返交通参考\n\n");
     if (!mapData.enabled() || (outboundMissing && returnMissing)) {
-      String status = mapData.enabled() ? "地图暂未返回可用班次" : "地图动态查询未启用";
+      String status = mapData.enabled() ? "动态交通服务暂未返回可用班次" : "动态交通查询未启用";
       text.append("| 方向 | 日期 | 路线 | 查询状态 |\n")
           .append("|---|---|---|---|\n")
           .append("| 去程 | ").append(outboundDate).append(" | ")
@@ -362,11 +409,21 @@ public final class TravelAgentService {
         text.append("行程仍保留，具体车次与票价请通过官方平台确认。\n\n");
       }
     } else {
-      text.append("以下为地图服务在生成方案时返回的候选，价格与班次不代表余票或最终成交信息。\n\n")
-          .append("| 方向 | 日期 | 交通 | 班次 | 发到站 | 发到时间 | 预计耗时 | 参考价格 |\n")
-          .append("|---|---|---|---|---|---|---:|---:|\n");
-      appendRouteRows(text, "去程", origin + " → " + destination, mapData.outboundRoutes());
-      appendRouteRows(text, "返程", destination + " → " + origin, mapData.returnRoutes());
+      text.append("以下为交通数据服务在生成方案时返回的候选，标有“推荐”的组合同时考虑价格、耗时和首尾日可用时间；班次不代表余票或最终成交信息。\n\n")
+          .append("| 方向 | 日期 | 交通 | 班次 | 发到站 | 发到时间 | 预计耗时 | 参考价格 | 数据来源 |\n")
+          .append("|---|---|---|---|---|---|---:|---:|---|\n");
+      appendRouteRows(
+          text,
+          "去程",
+          origin + " → " + destination,
+          mapData.outboundRoutes(),
+          mapData.recommendedOutbound().orElse(null));
+      appendRouteRows(
+          text,
+          "返程",
+          destination + " → " + origin,
+          mapData.returnRoutes(),
+          mapData.recommendedReturn().orElse(null));
       text.append("\n");
       if (outboundMissing) {
         text.append("- 去程（").append(outboundDate).append("）暂未返回可用班次。\n");
@@ -411,7 +468,8 @@ public final class TravelAgentService {
       StringBuilder text,
       String direction,
       String places,
-      List<TravelMapData.RouteOption> routes) {
+      List<TravelMapData.RouteOption> routes,
+      TravelMapData.RouteOption recommended) {
     for (TravelMapData.RouteOption route : routes) {
       String price =
           route.referencePriceYuan() > 0
@@ -422,15 +480,32 @@ public final class TravelAgentService {
           route.bookingUrl().isBlank()
               ? markdownCell(route.serviceName())
               : "[" + markdownCell(route.serviceName()) + "](" + route.bookingUrl() + ")";
-      text.append("| ").append(direction).append("（").append(places).append("） | ")
+      String directionLabel = route.equals(recommended) ? direction + "（推荐）" : direction;
+      text.append("| ").append(directionLabel).append("（").append(places).append("） | ")
           .append(route.date()).append(" | ").append(route.mode()).append(" | ")
           .append(serviceName).append(" | ")
           .append(markdownCell(route.departureStation())).append(" → ")
           .append(markdownCell(route.arrivalStation())).append(" | ")
           .append(markdownCell(route.departureTime())).append(" → ")
           .append(markdownCell(route.arrivalTime())).append(" | ")
-          .append(duration).append(" | ").append(price).append(" |\n");
+          .append(duration).append(" | ").append(price).append(" | ")
+          .append(routeSource(route)).append(" |\n");
     }
+  }
+
+  private static String routeSource(TravelMapData.RouteOption route) {
+    String provider =
+        switch (route.source()) {
+          case "juhe-rail-api-817" -> "聚合数据铁路";
+          case "baidu-map" -> "百度地图";
+          default -> "外部数据";
+        };
+    return provider
+        + "（"
+        + java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")
+            .withZone(java.time.ZoneId.systemDefault())
+            .format(route.queriedAt())
+        + "）";
   }
 
   private static String markdownCell(String value) {

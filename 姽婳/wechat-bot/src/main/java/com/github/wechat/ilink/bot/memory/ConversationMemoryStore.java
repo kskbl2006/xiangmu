@@ -13,7 +13,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Small per-user persistent memory containing only a bounded number of recent dialogue turns. */
+/** 按用户保存有限轮次的近期对话。 */
 public final class ConversationMemoryStore {
   public record Turn(String user, String assistant) {}
 

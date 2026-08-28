@@ -13,7 +13,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Offline utility that normalizes the demo data and persists its dense vectors. */
+/** 离线整理演示数据并保存稠密向量的工具。 */
 public final class TravelRagIndexBuilder {
   private static final Logger log = LoggerFactory.getLogger(TravelRagIndexBuilder.class);
   private static final int MAX_CHUNK_CHARS = 700;

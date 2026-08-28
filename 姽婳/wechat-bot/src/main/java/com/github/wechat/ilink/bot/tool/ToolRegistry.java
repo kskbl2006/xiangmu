@@ -9,7 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
 
-/** Registers tools, exports OpenAI-compatible definitions, validates arguments, and executes calls. */
+/** 注册工具、导出兼容定义、校验参数并执行调用。 */
 public final class ToolRegistry {
   static final int MAX_ARGUMENT_LENGTH = 8_192;
   static final int MAX_RESULT_LENGTH = 16_384;

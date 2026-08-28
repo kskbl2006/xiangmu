@@ -7,7 +7,7 @@ import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Runs different users concurrently while preserving message order for each individual user. */
+/** 不同用户并发执行，同一用户保持消息顺序。 */
 final class PerUserTaskExecutor implements AutoCloseable {
   private static final Logger log = LoggerFactory.getLogger(PerUserTaskExecutor.class);
   private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();

@@ -3,7 +3,7 @@ package com.github.wechat.ilink.bot.intent;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
-/** Deterministic first-pass intent recognition for commands and weather requests. */
+/** 对命令和天气请求进行首轮规则意图识别。 */
 public final class IntentRecognizer {
   public enum Intent {
     WEATHER,
@@ -41,7 +41,7 @@ public final class IntentRecognizer {
     return new Result(Intent.CHAT, null);
   }
 
-  /** Extracts a location from the user's reply after the bot explicitly asked for a city. */
+  /** Bot 询问城市后，从用户回复中提取地点。 */
   public String extractLocationReply(String value) {
     if (value == null) return null;
     String location = LOCATION_REPLY_PREFIX.matcher(value.trim()).replaceFirst("");

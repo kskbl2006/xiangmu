@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** Real-embedding retrieval evaluation: lexical baseline vs dense vs dense plus constraints. */
+/** 真实向量检索评估：词法基线、稠密检索及约束增强对比。 */
 public final class TravelRagEvaluation {
   private static final int TOP_K = 4;
 

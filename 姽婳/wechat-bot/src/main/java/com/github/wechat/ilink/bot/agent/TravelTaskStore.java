@@ -12,7 +12,7 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Persists the last canonical travel goal and execution stage for continuation after failures. */
+/** 保存最近的标准旅行目标和执行阶段，支持失败后续跑。 */
 public final class TravelTaskStore {
   private static final Logger log = LoggerFactory.getLogger(TravelTaskStore.class);
   private static final TypeReference<Map<String, Entry>> TYPE = new TypeReference<>() {};

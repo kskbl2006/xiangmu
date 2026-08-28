@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Isolated TTS and local audio-conversion check; it does not contact WeChat. */
+/** 独立测试语音合成和本地音频转换，不连接微信。 */
 public final class SpeechSmokeTest {
   private static final Logger log = LoggerFactory.getLogger(SpeechSmokeTest.class);
 

@@ -89,11 +89,14 @@ class TravelAgentServiceTest {
 
     assertTrue(result.completed());
     assertEquals(3, result.plan().days().size());
-    assertEquals(5000, result.plan().budget().total());
+    assertTrue(result.plan().budget().total() < 5000);
+    assertEquals(
+        5000,
+        result.plan().budget().total() + result.plan().budget().remaining());
     assertTrue(result.reply().contains("Markdown 与 PDF 附件"));
     assertTrue(result.markdownDocument().startsWith("# 上海 3 天旅行方案"));
     assertTrue(result.markdownDocument().contains("## 预算分配"));
-    assertTrue(result.markdownDocument().contains("| **预计总支出** | **5000 元** |"));
+    assertTrue(result.markdownDocument().contains("| **预算余量** |"));
     assertFalse(result.markdownDocument().contains("attraction:test-"));
     assertFalse(result.markdownDocument().contains("Agent 执行过程"));
   }
@@ -177,10 +180,15 @@ class TravelAgentServiceTest {
 
     assertTrue(result.markdownDocument().contains("## 往返交通参考"));
     assertTrue(result.markdownDocument().contains("G7001"));
+    assertTrue(result.markdownDocument().contains("去程（推荐）"));
     assertTrue(result.markdownDocument().contains("地图参考评分：4.8"));
     assertTrue(result.markdownDocument().contains("人民大道201号"));
     assertTrue(result.markdownDocument().contains("往返大交通（动态参考） | 598 元"));
-    assertEquals(4402, result.plan().budget().total());
+    assertEquals(
+        5000,
+        result.plan().budget().total()
+            + result.plan().budget().remaining()
+            + result.plan().mapData().referenceRoundTripCost(2));
   }
 
   @Test
@@ -208,7 +216,7 @@ class TravelAgentServiceTest {
 
     assertTrue(result.completed());
     assertTrue(result.markdownDocument().contains("## 往返交通参考"));
-    assertTrue(result.markdownDocument().contains("地图暂未返回可用班次"));
+    assertTrue(result.markdownDocument().contains("动态交通服务暂未返回可用班次"));
     assertTrue(result.markdownDocument().contains("百度地图查询去程"));
     assertTrue(result.markdownDocument().contains("铁路 12306 查询"));
     assertTrue(result.markdownDocument().contains("已查询从常州到上海的往返交通"));

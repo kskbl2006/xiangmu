@@ -5,7 +5,7 @@ import com.github.wechat.ilink.bot.llm.QwenClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** A manually-run credential check. It sends one short prompt and never logs the API key. */
+/** 手动密钥检查，仅发送一条短提示且不记录 API Key。 */
 public final class QwenSmokeTest {
   private static final Logger log = LoggerFactory.getLogger(QwenSmokeTest.class);
 

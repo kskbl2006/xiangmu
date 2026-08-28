@@ -11,7 +11,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
-/** Returns current China time and supports relative date calculations. */
+/** 返回中国当前时间，并支持相对日期计算。 */
 public final class DateTimeTool implements BotTool {
   private static final ZoneId CHINA_ZONE = ZoneId.of("Asia/Shanghai");
   private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ISO_LOCAL_DATE;

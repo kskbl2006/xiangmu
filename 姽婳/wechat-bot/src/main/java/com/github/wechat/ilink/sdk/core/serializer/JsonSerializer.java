@@ -8,8 +8,8 @@ public class JsonSerializer implements Serializer {
   private final ObjectMapper mapper =
       new ObjectMapper()
           .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-          // The iLink gateway may decode request bytes without honoring UTF-8. JSON Unicode escapes
-          // keep outbound Chinese text ASCII-only while preserving its semantic value.
+          // iLink 网关可能不按 UTF-8 解码请求。
+          // JSON Unicode 转义可在保留语义的同时避免中文编码异常。
           .configure(JsonGenerator.Feature.ESCAPE_NON_ASCII, true);
 
   public String serialize(Object obj) {

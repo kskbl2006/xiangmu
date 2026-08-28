@@ -70,9 +70,8 @@ public class ILinkClient implements AutoCloseable {
     private HeartbeatService heartbeatService;
 
     /**
-     * Serializes {@link UpdateService#poll} for this client. Concurrent polls (e.g. heartbeat +
-     * {@link #getUpdates}, or two threads calling {@link #getUpdates}) used the same cursor and could
-     * overwrite each other's cursor / drop messages; see
+     * 串行执行当前客户端的 {@link UpdateService#poll}。并发轮询（如心跳与
+     * {@link #getUpdates}，或两个线程同时调用）会共用游标，可能相互覆盖并丢失消息；详见
      * <a href="https://github.com/lith0924/wechat-ilink-sdk-java/issues/5">#5</a>.
      */
     private final Object pollLock = new Object();
@@ -170,9 +169,8 @@ public class ILinkClient implements AutoCloseable {
     }
 
     /**
-     * Single entry for long-poll: serializes {@link UpdateService#poll} per client; notifies {@link
-     * OnMessageListener} after releasing {@link #pollLock} so listeners can safely call {@link
-     * #getUpdates} (including from other threads) without deadlock.
+     * 长轮询统一入口：按客户端串行执行 {@link UpdateService#poll}；释放 {@link #pollLock}
+     * 后再通知 {@link OnMessageListener}，使监听器可安全调用 {@link #getUpdates}，避免死锁。
      */
     private List<WeixinMessage> pollAndDispatchMessages() throws IOException {
         final List<WeixinMessage> messages;

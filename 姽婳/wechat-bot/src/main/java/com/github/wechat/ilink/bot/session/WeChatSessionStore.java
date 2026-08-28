@@ -17,7 +17,7 @@ import java.util.EnumSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Persists the iLink login, update cursor and conversation tokens outside version control. */
+/** 在版本控制外保存 iLink 登录信息、更新游标和会话令牌。 */
 public final class WeChatSessionStore {
   private static final Logger log = LoggerFactory.getLogger(WeChatSessionStore.class);
   private static final EnumSet<PosixFilePermission> OWNER_ONLY =

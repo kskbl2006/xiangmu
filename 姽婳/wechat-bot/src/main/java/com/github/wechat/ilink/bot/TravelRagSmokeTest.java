@@ -5,7 +5,7 @@ import com.github.wechat.ilink.bot.config.AppConfig;
 import com.github.wechat.ilink.bot.travelrag.TravelRagService;
 import java.util.Locale;
 
-/** Isolated semantic-retrieval smoke test; it does not connect to WeChat or call the chat model. */
+/** 独立测试语义检索，不连接微信或调用聊天模型。 */
 public final class TravelRagSmokeTest {
   private TravelRagSmokeTest() {}
 

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.wechat.ilink.bot.agent.TravelMapData.PoiSnapshot;
 import com.github.wechat.ilink.bot.agent.TravelMapData.RouteOption;
 import com.github.wechat.ilink.bot.config.AppConfig;
+import com.github.wechat.ilink.bot.resilience.ProviderCircuitBreaker;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
@@ -23,7 +24,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
-/** Minimal server-side client for Baidu geocoding, cross-city transit and Place 2.0. */
+/** 百度地理编码、跨城交通和地点检索的轻量服务端客户端。 */
 public final class BaiduMapClient {
   public record Point(double latitude, double longitude) {
     String baiduCoordinate() {
@@ -37,6 +38,7 @@ public final class BaiduMapClient {
   private final String apiKey;
   private final long minimumIntervalNanos;
   private final Clock clock;
+  private final ProviderCircuitBreaker circuitBreaker;
   private static final long GEOCODE_CACHE_MILLIS = Duration.ofHours(24).toMillis();
   private static final long POI_CACHE_MILLIS = Duration.ofMinutes(30).toMillis();
   private static final int MAX_CACHE_ENTRIES = 500;
@@ -44,7 +46,7 @@ public final class BaiduMapClient {
       new ConcurrentHashMap<>();
   private final ConcurrentHashMap<String, Cached<Optional<PoiSnapshot>>> poiCache =
       new ConcurrentHashMap<>();
-  /** Personal Baidu accounts allow 3 concurrent calls; keep one request in flight for headroom. */
+  /** 个人百度账号并发上限为 3，此处限制为单请求以预留空间。 */
   private final Semaphore requestPermit = new Semaphore(1, true);
   private long lastRequestNanos;
 
@@ -52,7 +54,7 @@ public final class BaiduMapClient {
 
   public BaiduMapClient(AppConfig config) {
     this(
-        new OkHttpClient(),
+        new OkHttpClient.Builder().callTimeout(Duration.ofSeconds(20)).build(),
         new ObjectMapper(),
         config.getBaiduMapBaseUrl(),
         config.hasBaiduMapApiKey() ? config.requireBaiduMapApiKey() : "",
@@ -73,10 +75,19 @@ public final class BaiduMapClient {
     this.apiKey = apiKey == null ? "" : apiKey.trim();
     this.minimumIntervalNanos = Math.max(0, minimumIntervalMillis) * 1_000_000L;
     this.clock = clock;
+    this.circuitBreaker = new ProviderCircuitBreaker(3, Duration.ofMinutes(5), clock);
   }
 
   public boolean isConfigured() {
     return !apiKey.isBlank();
+  }
+
+  public boolean isAvailable() {
+    return isConfigured() && circuitBreaker.state() != ProviderCircuitBreaker.State.OPEN;
+  }
+
+  public ProviderCircuitBreaker.State providerState() {
+    return circuitBreaker.state();
   }
 
   public Optional<Point> geocode(String city) throws IOException {
@@ -123,8 +134,8 @@ public final class BaiduMapClient {
     try {
       return parseRoutes(getJson(url), date);
     } catch (BaiduApiException e) {
-      // Baidu uses status 1001 when no transit plan is available for this route/date.
-      // This is an expected empty result, not an authentication or service failure.
+      // 百度以状态码 1001 表示当前路线或日期没有公交方案。
+      // 这是正常空结果，不代表鉴权或服务失败。
       if (e.status() == 1001) return List.of();
       throw e;
     }
@@ -157,6 +168,9 @@ public final class BaiduMapClient {
   }
 
   private JsonNode getJson(HttpUrl url) throws IOException {
+    if (!circuitBreaker.allowRequest()) {
+      throw new IOException("Baidu Map provider circuit is open; using fallback");
+    }
     acquireRequestPermit();
     try {
       awaitRateLimit();
@@ -169,9 +183,17 @@ public final class BaiduMapClient {
         int status = root.path("status").asInt(-1);
         if (status != 0) {
           String message = root.path("message").asText(root.path("msg").asText("unknown error"));
+          if (status == 1001) circuitBreaker.recordSuccess();
+          else circuitBreaker.recordFailure();
           throw new BaiduApiException(status, message);
         }
+        circuitBreaker.recordSuccess();
         return root;
+      } catch (BaiduApiException e) {
+        throw e;
+      } catch (IOException e) {
+        circuitBreaker.recordFailure();
+        throw e;
       }
     } finally {
       requestPermit.release();
@@ -261,7 +283,10 @@ public final class BaiduMapClient {
               arrivalTime,
               durationMinutes,
               price,
-              httpUrlOnly(detail.path("booking").asText(""))));
+              httpUrlOnly(detail.path("booking").asText("")),
+              "baidu-map",
+              Instant.now(clock),
+              0.65));
       if (result.size() == 3) return List.copyOf(result);
     }
     return List.copyOf(result);
@@ -281,9 +306,8 @@ public final class BaiduMapClient {
   }
 
   private static JsonNode selectPrimaryIntercityVehicle(List<JsonNode> vehicles) {
-    // A route may contain a coach/airport shuttle before its main train segment.
-    // Select by travel-mode priority instead of response order so the route label
-    // represents the primary intercity leg requested by train-priority tactics.
+    // 路线可能先包含大巴或机场接驳，再进入主要铁路段。
+    // 按交通方式优先级选择，确保标签反映主要跨城路段。
     for (int preferredType : List.of(1, 2, 6)) {
       for (JsonNode vehicle : vehicles) {
         if (vehicle.path("type").asInt() == preferredType) return vehicle;
@@ -297,9 +321,8 @@ public final class BaiduMapClient {
                     looksLikeIntercityCoach(
                         vehicle.path("detail").path("name").asText("")))
             .toList();
-    // A single coach leg is a useful direct option. Several coach legs form a
-    // slow transfer chain; reducing that chain to its first bus creates a false
-    // route label, so leave it out and let the document expose the fallback.
+    // 单段大巴可作为直达方案；多段大巴通常是低效换乘链。
+    // 此时不取首段作为整条路线，交由文档显示降级说明。
     return coachLegs.size() == 1 ? coachLegs.getFirst() : null;
   }
 
@@ -345,7 +368,8 @@ public final class BaiduMapClient {
       String actual = compact(candidate.path("name").asText(""));
       if (actual.equals(expected) || actual.contains(expected) || expected.contains(actual)) return candidate;
     }
-    return results.get(0);
+    // 首条结果若不匹配，可能误用其他地点的价格或开放时间。
+    return null;
   }
 
   private HttpUrl.Builder endpoint(String path) {

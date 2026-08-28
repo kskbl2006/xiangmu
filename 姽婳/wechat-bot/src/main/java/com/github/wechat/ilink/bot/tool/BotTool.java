@@ -3,7 +3,7 @@ package com.github.wechat.ilink.bot.tool;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-/** A locally executed function that can be exposed to the LLM. */
+/** 可供大模型调用的本地工具。 */
 public interface BotTool {
   String name();
 

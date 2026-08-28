@@ -12,7 +12,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Isolated real-model check for two independent tool calls in the same round. */
+/** 使用真实模型测试同一轮中的两个独立工具调用。 */
 public final class ParallelToolCallingSmokeTest {
   private static final Logger log = LoggerFactory.getLogger(ParallelToolCallingSmokeTest.class);
 

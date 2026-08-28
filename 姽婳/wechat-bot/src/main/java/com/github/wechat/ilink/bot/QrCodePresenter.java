@@ -7,7 +7,7 @@ import java.util.Base64;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Makes the SDK login QR code accessible without logging a credential-bearing raw value. */
+/** 展示 SDK 登录二维码，避免在日志中输出含凭据的原始内容。 */
 final class QrCodePresenter {
   private static final Logger log = LoggerFactory.getLogger(QrCodePresenter.class);
 

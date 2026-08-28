@@ -62,17 +62,28 @@ public class HttpClientFacade {
   }
 
   public String uploadBytes(String url, byte[] data) throws IOException {
-    Request req =
-        new Request.Builder()
-            .url(url)
-            .post(RequestBody.create(MediaType.parse("application/octet-stream"), data))
-            .build();
-    try (Response r = client.newCall(req).execute()) {
-      if (!r.isSuccessful()) throw new IOException("upload failed code=" + r.code());
-      String encryptedParam = r.header("x-encrypted-param");
-      if (encryptedParam == null || encryptedParam.trim().isEmpty())
-        throw new IOException("missing x-encrypted-param");
-      return encryptedParam;
+    int attempt = 1;
+    while (true) {
+      Request req =
+          new Request.Builder()
+              .url(url)
+              .post(RequestBody.create(MediaType.parse("application/octet-stream"), data))
+              .build();
+      try (Response r = client.newCall(req).execute()) {
+        if (!r.isSuccessful()) throw new IOException("upload failed code=" + r.code());
+        String encryptedParam = r.header("x-encrypted-param");
+        if (encryptedParam == null || encryptedParam.trim().isEmpty())
+          throw new IOException("missing x-encrypted-param");
+        return encryptedParam;
+      } catch (IOException e) {
+        if (attempt >= retryPolicy.getMaxAttempts()) {
+          throw new ConnectFailedException("upload failed after retries: " + url, e);
+        }
+        long delay = retryPolicy.nextDelayMillis(attempt);
+        log.warn("HTTP upload retry {} url={} delay={}ms", attempt, url, delay);
+        sleep(delay);
+        attempt++;
+      }
     }
   }
 

@@ -5,7 +5,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Bounded TTL cache for iLink message IDs, which may be redelivered after polling retries. */
+/** iLink 消息 ID 的限量 TTL 缓存，用于过滤轮询重试产生的重复消息。 */
 final class MessageDeduplicator {
   private final long ttlMillis;
   private final int maxEntries;

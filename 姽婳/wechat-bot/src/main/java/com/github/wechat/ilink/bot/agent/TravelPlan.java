@@ -2,12 +2,13 @@ package com.github.wechat.ilink.bot.agent;
 
 import java.util.List;
 
-/** Structured artifact shared by the planner, reviewer and final renderer. */
+/** 供规划、审校和最终渲染共享的结构化方案。 */
 public record TravelPlan(
     TravelBrief brief,
     TravelForecast forecast,
     TravelMapData mapData,
     List<DayPlan> days,
+    List<TravelLeg> cityLegs,
     Budget budget,
     String generationMode,
     List<String> executionSteps,
@@ -20,9 +21,33 @@ public record TravelPlan(
             : forecast;
     mapData = mapData == null ? TravelMapData.disabled(brief.destination()) : mapData;
     days = days == null ? List.of() : List.copyOf(days);
+    cityLegs = cityLegs == null ? List.of() : List.copyOf(cityLegs);
     generationMode = generationMode == null ? "local-rule-planning" : generationMode;
     executionSteps = executionSteps == null ? List.of() : List.copyOf(executionSteps);
     reviewIssues = reviewIssues == null ? List.of() : List.copyOf(reviewIssues);
+  }
+
+  public TravelPlan(
+      TravelBrief brief,
+      TravelForecast forecast,
+      TravelMapData mapData,
+      List<DayPlan> days,
+      Budget budget,
+      String generationMode,
+      List<String> executionSteps,
+      int reviewRounds,
+      List<ReviewIssue> reviewIssues) {
+    this(
+        brief,
+        forecast,
+        mapData,
+        days,
+        List.of(),
+        budget,
+        generationMode,
+        executionSteps,
+        reviewRounds,
+        reviewIssues);
   }
 
   public TravelPlan(
@@ -39,6 +64,7 @@ public record TravelPlan(
         forecast,
         TravelMapData.disabled(brief.destination()),
         days,
+        List.of(),
         budget,
         generationMode,
         executionSteps,
@@ -59,6 +85,7 @@ public record TravelPlan(
         legacyForecast(brief, weatherSummary),
         TravelMapData.disabled(brief.destination()),
         days,
+        List.of(),
         budget,
         "local-rule-planning",
         executionSteps,
@@ -80,6 +107,7 @@ public record TravelPlan(
         legacyForecast(brief, weatherSummary),
         TravelMapData.disabled(brief.destination()),
         days,
+        List.of(),
         budget,
         generationMode,
         executionSteps,
@@ -126,7 +154,44 @@ public record TravelPlan(
   public record Activity(
       String period, String title, String sourceId, boolean outdoor, String note) {}
 
-  public record Budget(int lodging, int food, int localTransport, int tickets, int buffer) {
+  public record TravelLeg(
+      int day,
+      String from,
+      String to,
+      String mode,
+      double distanceKm,
+      int durationMinutes,
+      int costYuan,
+      String source,
+      double confidence) {
+    public TravelLeg {
+      day = Math.max(1, day);
+      from = from == null ? "" : from.trim();
+      to = to == null ? "" : to.trim();
+      mode = mode == null || mode.isBlank() ? "待确认" : mode.trim();
+      distanceKm = Math.max(0, distanceKm);
+      durationMinutes = Math.max(0, durationMinutes);
+      costYuan = Math.max(0, costYuan);
+      source = source == null || source.isBlank() ? "unknown" : source.trim();
+      confidence = Math.max(0, Math.min(1, confidence));
+    }
+  }
+
+  public record Budget(
+      int lodging, int food, int localTransport, int tickets, int buffer, int remaining) {
+    public Budget {
+      lodging = Math.max(0, lodging);
+      food = Math.max(0, food);
+      localTransport = Math.max(0, localTransport);
+      tickets = Math.max(0, tickets);
+      buffer = Math.max(0, buffer);
+      remaining = Math.max(0, remaining);
+    }
+
+    public Budget(int lodging, int food, int localTransport, int tickets, int buffer) {
+      this(lodging, food, localTransport, tickets, buffer, 0);
+    }
+
     public int total() {
       return lodging + food + localTransport + tickets + buffer;
     }

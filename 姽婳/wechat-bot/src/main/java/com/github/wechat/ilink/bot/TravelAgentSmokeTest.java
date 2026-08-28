@@ -10,10 +10,12 @@ import com.github.wechat.ilink.bot.agent.TravelPdfRenderer;
 import com.github.wechat.ilink.bot.config.AppConfig;
 import com.github.wechat.ilink.bot.maps.BaiduMapClient;
 import com.github.wechat.ilink.bot.maps.TravelMapService;
+import com.github.wechat.ilink.bot.maps.JuheRailClient;
+import com.github.wechat.ilink.bot.maps.TravelEvidenceService;
 import com.github.wechat.ilink.bot.travelrag.TravelRagService;
 import com.github.wechat.ilink.bot.weather.OpenMeteoWeather;
 
-/** Real API smoke test for the one-goal travel Agent MVP. */
+/** 单目标旅行 Agent MVP 的真实 API 冒烟测试。 */
 public final class TravelAgentSmokeTest {
   private TravelAgentSmokeTest() {}
 
@@ -27,6 +29,8 @@ public final class TravelAgentSmokeTest {
     OpenMeteoWeather weather = new OpenMeteoWeather(config);
     TravelMapService mapService =
         new TravelMapService(new BaiduMapClient(config), config.getBaiduMapMaxPoiQueries());
+    TravelEvidenceService evidenceService =
+        new TravelEvidenceService(mapService, new JuheRailClient(config));
     com.github.wechat.ilink.bot.llm.QwenClient qwenClient =
         new com.github.wechat.ilink.bot.llm.QwenClient(config);
     TravelAgentService agent =
@@ -36,7 +40,7 @@ public final class TravelAgentSmokeTest {
             new TravelPlanReviewSkill(),
             rag::retrieveAttractionsForPlanning,
             weather::forecast,
-            mapService::enrich);
+            evidenceService);
 
     TravelAgentService.Result result = agent.execute(goal);
     System.out.println(result.reply());

@@ -4,7 +4,7 @@ import com.github.wechat.ilink.bot.config.AppConfig;
 import com.github.wechat.ilink.bot.maps.BaiduMapClient;
 import java.time.LocalDate;
 
-/** Real-provider smoke test to run after adding a personal Baidu server-side AK. */
+/** 配置百度地图服务端 AK 后运行的真实服务冒烟测试。 */
 public final class BaiduMapSmokeTest {
   private BaiduMapSmokeTest() {}
 

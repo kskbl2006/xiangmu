@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Loads the packaged Agent Skill metadata so runtime code and SKILL.md cannot drift silently. */
+/** 加载 Agent Skill 元数据，避免运行代码与 SKILL.md 不一致。 */
 public record SkillDefinition(String name, String description, String body) {
   private static final Pattern NAME = Pattern.compile("(?m)^name:\\s*(.+?)\\s*$");
   private static final Pattern DESCRIPTION = Pattern.compile("(?m)^description:\\s*(.+?)\\s*$");

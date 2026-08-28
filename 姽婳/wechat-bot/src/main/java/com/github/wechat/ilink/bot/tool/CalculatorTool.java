@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
 import java.math.MathContext;
 
-/** Safe arithmetic tool supporting decimal numbers, parentheses, and +, -, *, /. */
+/** 支持小数、括号和四则运算的安全计算工具。 */
 public final class CalculatorTool implements BotTool {
   private final ObjectMapper objectMapper;
 

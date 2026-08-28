@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Command-line PDF QA helper: input Markdown path, output PDF path. */
+/** PDF 命令行检查工具：输入 Markdown 路径，输出 PDF 路径。 */
 public final class TravelPdfSmokeTest {
   private TravelPdfSmokeTest() {}
 

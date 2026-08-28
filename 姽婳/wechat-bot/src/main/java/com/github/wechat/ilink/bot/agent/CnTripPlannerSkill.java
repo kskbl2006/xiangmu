@@ -16,7 +16,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Qwen-backed itinerary composer with a deterministic local fallback. */
+/** 基于千问生成行程，并提供稳定的本地兜底。 */
 public final class CnTripPlannerSkill {
   private static final Logger log = LoggerFactory.getLogger(CnTripPlannerSkill.class);
   private static final Set<String> OUTDOOR_WORDS =
@@ -57,13 +57,22 @@ public final class CnTripPlannerSkill {
       TravelBrief brief,
       TravelForecast forecast,
       List<InMemoryTravelVectorStore.Hit> hits) {
+    return build(brief, forecast, hits, brief.budgetYuan());
+  }
+
+  public TravelPlan build(
+      TravelBrief brief,
+      TravelForecast forecast,
+      List<InMemoryTravelVectorStore.Hit> hits,
+      int destinationBudgetYuan) {
     List<TravelKnowledgeChunk> attractions = uniqueAttractions(hits);
     if (qwenClient != null && attractions.size() >= brief.days()) {
       long startedAt = System.nanoTime();
       try {
         String json =
             qwenClient.chatJson(
-                SYSTEM_INSTRUCTION, buildModelInput(brief, forecast, attractions));
+                SYSTEM_INSTRUCTION,
+                buildModelInput(brief, forecast, attractions, destinationBudgetYuan));
         TravelPlan plan = parseModelPlan(brief, forecast, attractions, json);
         log.info(
             "Qwen generated structured travel plan: days={}, elapsedMs={}",
@@ -80,7 +89,8 @@ public final class CnTripPlannerSkill {
       try {
         String json =
             qwenClient.chatJson(
-                GENERAL_KNOWLEDGE_INSTRUCTION, buildGeneralModelInput(brief, forecast));
+                GENERAL_KNOWLEDGE_INSTRUCTION,
+                buildGeneralModelInput(brief, forecast, destinationBudgetYuan));
         TravelPlan plan = parseGeneralModelPlan(brief, forecast, json);
         log.info(
             "Qwen generated general-knowledge travel plan: destination={}, days={}, elapsedMs={}",
@@ -96,12 +106,14 @@ public final class CnTripPlannerSkill {
     return buildLocal(brief, forecast, attractions, "local-rule-planning");
   }
 
-  private String buildGeneralModelInput(TravelBrief brief, TravelForecast forecast) {
+  private String buildGeneralModelInput(
+      TravelBrief brief, TravelForecast forecast, int destinationBudgetYuan) {
     ObjectNode root = objectMapper.createObjectNode();
     root.put("destination", brief.destination());
     root.put("days", brief.days());
     root.put("travelers", brief.travelers());
     root.put("budgetYuan", brief.budgetYuan());
+    root.put("availableDestinationBudgetYuan", Math.max(0, destinationBudgetYuan));
     root.put("pace", brief.pace());
     root.putPOJO("interests", brief.interests());
     addForecast(root, forecast);
@@ -113,13 +125,17 @@ public final class CnTripPlannerSkill {
   }
 
   private String buildModelInput(
-      TravelBrief brief, TravelForecast forecast, List<TravelKnowledgeChunk> attractions) {
+      TravelBrief brief,
+      TravelForecast forecast,
+      List<TravelKnowledgeChunk> attractions,
+      int destinationBudgetYuan) {
     ObjectNode root = objectMapper.createObjectNode();
     ObjectNode request = root.putObject("request");
     request.put("destination", brief.destination());
     request.put("days", brief.days());
     request.put("travelers", brief.travelers());
     request.put("budgetYuan", brief.budgetYuan());
+    request.put("availableDestinationBudgetYuan", Math.max(0, destinationBudgetYuan));
     request.put("pace", brief.pace());
     request.putPOJO("interests", brief.interests());
     addForecast(root, forecast);
@@ -190,7 +206,7 @@ public final class CnTripPlannerSkill {
         brief,
         forecast,
         days,
-        allocateBudget(brief.budgetYuan()),
+        emptyBudget(),
         "qwen-structured-planning",
         executionSteps(brief, true, true),
         0,
@@ -242,7 +258,7 @@ public final class CnTripPlannerSkill {
         brief,
         forecast,
         days,
-        allocateBudget(brief.budgetYuan()),
+        emptyBudget(),
         "qwen-general-knowledge-planning",
         executionSteps(brief, false, true),
         0,
@@ -289,7 +305,7 @@ public final class CnTripPlannerSkill {
         brief,
         forecast,
         days,
-        allocateBudget(brief.budgetYuan()),
+        emptyBudget(),
         generationMode,
         executionSteps(brief, !attractions.isEmpty(), false),
         0,
@@ -311,17 +327,12 @@ public final class CnTripPlannerSkill {
     if (brief.interests().contains("亲子")) steps.add("匹配亲子友好项目");
     if ("relaxed".equals(brief.pace())) steps.add("降低每日行程强度");
     steps.add(qwenPlanning ? "调用千问生成结构化行程" : "使用本地规则生成兜底行程");
-    steps.add("分配预算并执行行程审校");
+    steps.add("根据实际交通与行程动态核算预算并执行审校");
     return List.copyOf(steps);
   }
 
-  static TravelPlan.Budget allocateBudget(int total) {
-    int lodging = (int) Math.floor(total * 0.30);
-    int food = (int) Math.floor(total * 0.25);
-    int localTransport = (int) Math.floor(total * 0.20);
-    int tickets = (int) Math.floor(total * 0.15);
-    return new TravelPlan.Budget(
-        lodging, food, localTransport, tickets, total - lodging - food - localTransport - tickets);
+  private static TravelPlan.Budget emptyBudget() {
+    return new TravelPlan.Budget(0, 0, 0, 0, 0, 0);
   }
 
   private void addForecast(ObjectNode root, TravelForecast forecast) {

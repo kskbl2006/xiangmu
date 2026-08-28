@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.wechat.ilink.bot.weather.Weather;
 
-/** Function Calling adapter for the existing Seniverse weather module. */
+/** 心知天气模块的 Function Calling 适配器。 */
 public final class WeatherTool implements BotTool {
   private final Weather weather;
   private final ObjectMapper objectMapper;

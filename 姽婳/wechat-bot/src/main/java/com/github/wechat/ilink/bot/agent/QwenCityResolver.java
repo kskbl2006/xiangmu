@@ -7,7 +7,7 @@ import java.io.IOException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Extracts a Chinese travel destination from free-form goals with Qwen structured output. */
+/** 使用千问结构化输出，从自由文本中提取中国旅行目的地。 */
 public final class QwenCityResolver implements TravelBriefSkill.CityResolver {
   private static final Logger log = LoggerFactory.getLogger(QwenCityResolver.class);
   private static final String SYSTEM_INSTRUCTION =

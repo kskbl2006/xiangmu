@@ -8,12 +8,15 @@ import com.github.wechat.ilink.bot.agent.TravelBriefSkill;
 import com.github.wechat.ilink.bot.agent.TravelPlanReviewSkill;
 import com.github.wechat.ilink.bot.agent.TravelPdfRenderer;
 import com.github.wechat.ilink.bot.agent.TravelTaskStore;
+import com.github.wechat.ilink.bot.agent.TravelCheckpointStore;
 import com.github.wechat.ilink.bot.config.AppConfig;
 import com.github.wechat.ilink.bot.intent.IntentRecognizer;
 import com.github.wechat.ilink.bot.intent.IntentRecognizer.Intent;
 import com.github.wechat.ilink.bot.llm.QwenClient;
 import com.github.wechat.ilink.bot.maps.BaiduMapClient;
 import com.github.wechat.ilink.bot.maps.TravelMapService;
+import com.github.wechat.ilink.bot.maps.JuheRailClient;
+import com.github.wechat.ilink.bot.maps.TravelEvidenceService;
 import com.github.wechat.ilink.bot.memory.ConversationMemoryStore;
 import com.github.wechat.ilink.bot.speech.AudioConverter;
 import com.github.wechat.ilink.bot.speech.QwenAsrClient;
@@ -44,7 +47,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Routes iLink messages without blocking the long-poll thread on LLM and media work. */
+/** 路由 iLink 消息，避免大模型和媒体任务阻塞长轮询线程。 */
 public final class WeChatMessageRouter implements OnMessageListener, AutoCloseable {
   private static final Logger log = LoggerFactory.getLogger(WeChatMessageRouter.class);
   private static final long ATTACHMENT_WAIT_SECONDS = 3L;
@@ -84,8 +87,12 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
     ObjectMapper objectMapper = new ObjectMapper();
     Weather weather = new Weather(config);
     OpenMeteoWeather travelWeather = new OpenMeteoWeather(config);
+    BaiduMapClient baiduMapClient = new BaiduMapClient(config);
     TravelMapService travelMapService =
-        new TravelMapService(new BaiduMapClient(config), config.getBaiduMapMaxPoiQueries());
+        new TravelMapService(baiduMapClient, config.getBaiduMapMaxPoiQueries());
+    JuheRailClient railClient = new JuheRailClient(config);
+    TravelEvidenceService travelEvidenceService =
+        new TravelEvidenceService(travelMapService, railClient);
     this.toolRegistry =
         new ToolRegistry(
             objectMapper,
@@ -101,7 +108,10 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
             new TravelPlanReviewSkill(),
             travelRagService::retrieveAttractionsForPlanning,
             travelWeather::forecast,
-            travelMapService::enrich);
+            travelEvidenceService,
+            new TravelCheckpointStore(
+                Path.of("runtime", "travel-evidence-checkpoints.json"),
+                Duration.ofHours(config.getTravelCheckpointHours())));
     this.travelPdfRenderer = new TravelPdfRenderer(config);
     log.info("Initialized tool calling: tools={}", toolRegistry.names());
     log.info(
@@ -109,7 +119,16 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
         config.isTravelRagEnabled(),
         travelRagService.size(),
         travelRagService.model());
-    log.info("Initialized Baidu Map enrichment: enabled={}", config.hasBaiduMapApiKey());
+    log.info(
+        "Initialized Baidu Map enrichment: enabled={}, state={}",
+        config.hasBaiduMapApiKey(),
+        baiduMapClient.providerState());
+    log.info(
+        "Initialized rail enrichment: switchEnabled={}, keyConfigured={}, available={}, dailyLimit={}",
+        config.isJuheRailEnabled(),
+        config.hasJuheRailApiKey(),
+        railClient.isAvailable(),
+        config.getJuheRailDailyLimit());
   }
 
   @Override
@@ -196,9 +215,9 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
           throw e;
         }
         client.sendText(sender, result.reply());
-        sendTravelArtifacts(client, sender, result);
         storeTravelResult(sender, travelGoal, result);
         memory.addTurn(sender, text, result.reply());
+        sendTravelArtifacts(client, sender, result);
         logRoute(sender, "travel-artifacts");
         return;
       }
@@ -340,19 +359,27 @@ public final class WeChatMessageRouter implements OnMessageListener, AutoCloseab
   }
 
   private void sendTravelArtifacts(
-      ILinkClient client, String sender, TravelAgentService.Result result) throws Exception {
+      ILinkClient client, String sender, TravelAgentService.Result result) {
     if (result.markdownDocument() == null) return;
-    client.sendFile(
-        sender,
-        result.markdownDocument().getBytes(StandardCharsets.UTF_8),
-        result.fileName(),
-        null);
     try {
+      client.sendFile(
+          sender,
+          result.markdownDocument().getBytes(StandardCharsets.UTF_8),
+          result.fileName(),
+          null);
       byte[] pdf = travelPdfRenderer.render(result.markdownDocument());
       String pdfName = result.fileName().replaceFirst("\\.md$", ".pdf");
       client.sendFile(sender, pdf, pdfName, null);
     } catch (Exception e) {
-      log.warn("Unable to render travel PDF for userId={}: {}", sender, e.getMessage());
+      log.warn("Unable to deliver travel attachments for userId={}: {}", sender, e.getMessage());
+      try {
+        client.sendText(sender, "旅行方案已经生成，但附件上传暂时失败。请稍后发送“继续上次任务”重试。");
+      } catch (Exception notificationFailure) {
+        log.warn(
+            "Unable to report travel attachment failure for userId={}: {}",
+            sender,
+            notificationFailure.getMessage());
+      }
     }
   }
 

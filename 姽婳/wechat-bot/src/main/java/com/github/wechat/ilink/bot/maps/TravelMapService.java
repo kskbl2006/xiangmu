@@ -1,10 +1,12 @@
 package com.github.wechat.ilink.bot.maps;
 
 import com.github.wechat.ilink.bot.agent.TravelBrief;
+import com.github.wechat.ilink.bot.agent.PlaceCandidate;
 import com.github.wechat.ilink.bot.agent.TravelMapData;
 import com.github.wechat.ilink.bot.agent.TravelMapData.PoiSnapshot;
 import com.github.wechat.ilink.bot.agent.TravelMapData.RouteOption;
 import com.github.wechat.ilink.bot.agent.TravelPlan;
+import com.github.wechat.ilink.bot.agent.TravelEvidenceProvider;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -16,8 +18,8 @@ import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Enriches a completed itinerary with dynamic map facts while preserving no-key fallback. */
-public final class TravelMapService {
+/** 在规划前收集跨城交通和 POI 证据，并支持无密钥降级。 */
+public final class TravelMapService implements TravelEvidenceProvider {
   private static final Logger log = LoggerFactory.getLogger(TravelMapService.class);
   private final BaiduMapClient client;
   private final int maxPoiQueries;
@@ -32,15 +34,51 @@ public final class TravelMapService {
   }
 
   public TravelMapData enrich(TravelBrief brief, TravelPlan plan) {
+    List<PlaceCandidate> candidates =
+        plan.days().stream()
+            .flatMap(day -> day.activities().stream())
+            .map(
+                activity ->
+                    new PlaceCandidate(
+                        activity.sourceId(),
+                        activity.title(),
+                        activity.outdoor(),
+                        activity.note(),
+                        "planned-activity",
+                        java.time.Instant.EPOCH,
+                        0.5,
+                        0.2,
+                        null,
+                        null))
+            .toList();
+    return enrich(brief, candidates);
+  }
+
+  public TravelMapData enrich(TravelBrief brief, List<PlaceCandidate> candidates) {
+    return collect(brief, candidates, true);
+  }
+
+  public TravelMapData collect(
+      TravelBrief brief, List<PlaceCandidate> candidates, boolean includeIntercityTransit) {
     if (!client.isConfigured()) {
       return TravelMapData.disabled(brief.origin(), brief.destination());
+    }
+    if (!client.isAvailable()) {
+      return new TravelMapData(
+          true,
+          brief.origin(),
+          brief.destination(),
+          List.of(),
+          List.of(),
+          Map.of(),
+          List.of("地图服务连续失败后暂时熔断，方案已使用静态知识与官方查询入口降级"));
     }
     List<String> warnings = new ArrayList<>();
     List<RouteOption> outbound = List.of();
     List<RouteOption> inbound = List.of();
     if (brief.origin().isBlank()) {
       warnings.add("未提供出发地，未查询往返大交通");
-    } else if (!brief.origin().equals(brief.destination())) {
+    } else if (includeIntercityTransit && !brief.origin().equals(brief.destination())) {
       try {
         Optional<BaiduMapClient.Point> origin = client.geocode(brief.origin());
         Optional<BaiduMapClient.Point> destination = client.geocode(brief.destination());
@@ -72,9 +110,8 @@ public final class TravelMapService {
     }
 
     List<String> titles =
-        plan.days().stream()
-        .flatMap(day -> day.activities().stream())
-        .map(TravelPlan.Activity::title)
+        candidates.stream()
+        .map(PlaceCandidate::title)
         .distinct()
         .limit(maxPoiQueries)
         .toList();
@@ -101,6 +138,11 @@ public final class TravelMapService {
         inbound,
         pois,
         warnings);
+  }
+
+  @Override
+  public TravelMapData collect(TravelBrief brief, List<PlaceCandidate> candidates) {
+    return collect(brief, candidates, true);
   }
 
   private static String summarizeRoutes(List<RouteOption> routes) {

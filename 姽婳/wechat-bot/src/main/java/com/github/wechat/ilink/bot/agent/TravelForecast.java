@@ -4,7 +4,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
 
-/** Structured forecast aligned one-to-one with the requested itinerary days. */
+/** 与行程日期逐日对应的结构化天气预报。 */
 public record TravelForecast(String place, LocalDate startDate, List<Daily> days) {
   public TravelForecast {
     place = place == null ? "" : place.trim();

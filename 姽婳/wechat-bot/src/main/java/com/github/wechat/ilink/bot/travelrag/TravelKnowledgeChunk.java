@@ -2,7 +2,7 @@ package com.github.wechat.ilink.bot.travelrag;
 
 import java.util.List;
 
-/** One independently retrievable travel fact with its precomputed dense vector. */
+/** 可独立检索的旅行知识片段，包含预计算稠密向量。 */
 public record TravelKnowledgeChunk(
     String id,
     String city,

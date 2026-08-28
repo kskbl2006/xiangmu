@@ -13,7 +13,7 @@ import java.math.BigDecimal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Isolated real-model Function Calling check; it does not contact WeChat. */
+/** 独立测试真实模型的 Function Calling，不连接微信。 */
 public final class ToolCallingSmokeTest {
   private static final Logger log = LoggerFactory.getLogger(ToolCallingSmokeTest.class);
 

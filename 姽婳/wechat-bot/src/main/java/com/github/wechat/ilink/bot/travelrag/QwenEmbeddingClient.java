@@ -17,7 +17,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Minimal OpenAI-compatible client for DashScope text embeddings. */
+/** 百炼文本向量兼容接口的轻量客户端。 */
 public final class QwenEmbeddingClient {
   private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
   private static final int MAX_BATCH_SIZE = 20;

@@ -7,7 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
-/** Loads runtime settings from environment variables; credentials never belong in source control. */
+/** 从环境变量加载运行配置；密钥不得进入版本控制。 */
 public final class AppConfig {
   public static final String DEFAULT_DASHSCOPE_BASE_URL =
       "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -154,6 +154,42 @@ public final class AppConfig {
     return intValue("BAIDU_MAP_MAX_POI_QUERIES", 8, 0, 21);
   }
 
+  public boolean hasJuheRailApiKey() {
+    String key = getJuheRailApiKey();
+    return key != null && !key.isBlank();
+  }
+
+  public boolean isJuheRailEnabled() {
+    return Boolean.parseBoolean(value("JUHE_RAIL_ENABLED", "false", loadLocalProperties()));
+  }
+
+  public String requireJuheRailApiKey() {
+    String key = getJuheRailApiKey();
+    if (key == null || key.isBlank()) {
+      throw new IllegalStateException("JUHE_RAIL_API_KEY is required for live rail queries");
+    }
+    return key;
+  }
+
+  public String getJuheRailApiUrl() {
+    return value(
+        "JUHE_RAIL_API_URL",
+        "https://apis.juhe.cn/fapigw/train/query",
+        loadLocalProperties());
+  }
+
+  public int getJuheRailCacheMinutes() {
+    return intValue("JUHE_RAIL_CACHE_MINUTES", 360, 5, 1_440);
+  }
+
+  public int getJuheRailDailyLimit() {
+    return intValue("JUHE_RAIL_DAILY_LIMIT", 10, 1, 1_000);
+  }
+
+  public int getTravelCheckpointHours() {
+    return intValue("TRAVEL_CHECKPOINT_HOURS", 6, 1, 24);
+  }
+
   public String getTravelPdfFontPath() {
     return value("TRAVEL_PDF_FONT_PATH", "", loadLocalProperties());
   }
@@ -164,6 +200,10 @@ public final class AppConfig {
 
   private String getBaiduMapApiKey() {
     return value("BAIDU_MAP_AK", null, loadLocalProperties());
+  }
+
+  private String getJuheRailApiKey() {
+    return value("JUHE_RAIL_API_KEY", null, loadLocalProperties());
   }
 
   public boolean isWeChatAutoReplyEnabled() {

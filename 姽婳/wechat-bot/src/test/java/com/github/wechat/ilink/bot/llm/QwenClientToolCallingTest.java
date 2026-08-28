@@ -167,7 +167,7 @@ class QwenClientToolCallingTest {
           objectMapper.readTree(result.executions().get(1).result()).path("result").asText());
       assertFalse(result.answer().contains("<tool_call>"));
 
-      server.takeRequest(); // Initial request that asks the model to select the weather tool.
+      server.takeRequest(); // 首次请求让模型选择天气工具。
       JsonNode secondRequest = objectMapper.readTree(server.takeRequest().getBody().readUtf8());
       JsonNode weatherResult = secondRequest.path("messages").get(secondRequest.path("messages").size() - 1);
       assertEquals("call_weather", weatherResult.path("tool_call_id").asText());

@@ -5,7 +5,7 @@ import com.github.wechat.ilink.bot.weather.Weather;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Isolated Seniverse integration check; it does not contact WeChat. */
+/** 独立测试心知天气，不连接微信。 */
 public final class WeatherSmokeTest {
   private static final Logger log = LoggerFactory.getLogger(WeatherSmokeTest.class);
 

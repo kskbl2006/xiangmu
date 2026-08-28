@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Runtime implementation for the input-normalization portion of cn-trip-planner. */
+/** cn-trip-planner 输入标准化部分的运行实现。 */
 public final class TravelBriefSkill {
   private static final Logger log = LoggerFactory.getLogger(TravelBriefSkill.class);
   private static final List<String> SUPPORTED_CITIES = List.of("上海", "杭州", "苏州");
@@ -125,12 +125,15 @@ public final class TravelBriefSkill {
     } else if (parsedBudget == null) {
       assumptions.add("未提供预算，按每人每天600元落地支出估算");
     }
-    assumptions.add("预算按目的地落地支出估算，不含往返大交通");
+    assumptions.add("预算按旅行总预算估算，包含可查询到的往返大交通参考费用");
 
     String pace =
         message.contains("轻松") || message.contains("少走路")
             ? "relaxed"
             : message.contains("紧凑") || message.contains("多玩") ? "packed" : "balanced";
+    if (message.contains("自驾")) assumptions.add("交通偏好：自驾");
+    if (message.contains("老人") || message.contains("长辈")) assumptions.add("同行人包含老人，减少步行和频繁换乘");
+    if (message.contains("少走路")) assumptions.add("交通偏好：少走路");
     LinkedHashSet<String> interests = new LinkedHashSet<>();
     for (String interest : INTERESTS) {
       if (message.contains(interest)) interests.add(interest);

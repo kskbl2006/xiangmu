@@ -61,6 +61,7 @@ class TravelAgentBoundaryTest {
         generalCityAgent("哈尔滨", TravelForecast.unavailable("哈尔滨", LocalDate.now(), 3));
     TravelAgentService.Result result = unavailableWeather.execute("从长春出发去哈尔滨玩3天，预算3000元");
     assertTrue(result.completed());
+    assertNotNull(result.markdownDocument());
     assertTrue(result.markdownDocument().contains("天气暂不可查询"));
     assertFalse(result.markdownDocument().contains("天气晴朗"));
     assertFalse(result.markdownDocument().contains("晴天"));
@@ -71,7 +72,8 @@ class TravelAgentBoundaryTest {
     TravelAgentService agent = generalCityAgent("武汉", availableForecast("武汉", 2));
     TravelAgentService.Result result = agent.execute("两个人从长沙出发去武汉玩2天，预算200元");
 
-    assertTrue(result.completed());
+    assertFalse(result.completed());
+    assertNotNull(result.markdownDocument());
     assertTrue(result.markdownDocument().contains("人均每日预算低于150元"));
 
     TravelPdfRenderer renderer =

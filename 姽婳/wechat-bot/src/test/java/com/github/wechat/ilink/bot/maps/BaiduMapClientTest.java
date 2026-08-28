@@ -236,6 +236,27 @@ class BaiduMapClientTest {
   }
 
   @Test
+  void cachesMatchedPoiAndRejectsUnrelatedFirstResult() throws Exception {
+    try (MockWebServer server = new MockWebServer()) {
+      server.enqueue(json("""
+          {"status":0,"results":[{"name":"上海科技馆","address":"错误候选"}]}
+          """));
+      BaiduMapClient client =
+          new BaiduMapClient(
+              new OkHttpClient(),
+              new ObjectMapper(),
+              server.url("/").toString(),
+              "test-ak",
+              0,
+              Clock.systemUTC());
+
+      assertTrue(client.searchPoi("上海", "上海博物馆").isEmpty());
+      assertTrue(client.searchPoi("上海", "上海博物馆").isEmpty());
+      assertEquals(1, server.getRequestCount());
+    }
+  }
+
+  @Test
   void serializesRequestsToStayBelowPersonalConcurrencyLimit() throws Exception {
     try (MockWebServer server = new MockWebServer()) {
       AtomicInteger active = new AtomicInteger();

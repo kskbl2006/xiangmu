@@ -19,10 +19,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Manual iLink login and message-loop entry point.
+ * iLink 手动登录和消息循环入口。
  *
- * <p>It receives messages by default. Set WECHAT_AUTO_REPLY_ENABLED=true only after confirming
- * that your account can receive messages through iLink.
+ * <p>默认接收消息。确认账号可通过 iLink 收取消息后，再开启自动回复。
  */
 public final class WeChatBotApplication {
   private static final Logger log = LoggerFactory.getLogger(WeChatBotApplication.class);

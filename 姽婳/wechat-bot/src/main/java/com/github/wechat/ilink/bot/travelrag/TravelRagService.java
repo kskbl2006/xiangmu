@@ -10,7 +10,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Detects travel requests, performs semantic retrieval and builds a grounded model prompt. */
+/** 识别旅行请求、执行语义检索并构建有依据的模型提示词。 */
 public final class TravelRagService {
   private static final Logger log = LoggerFactory.getLogger(TravelRagService.class);
   private static final Set<String> TRAVEL_KEYWORDS =
@@ -54,7 +54,7 @@ public final class TravelRagService {
     return retrieve(userMessage, config.getTravelRagTopK());
   }
 
-  /** Retrieves more candidates for long-form planning while preserving the same scope guards. */
+  /** 为长行程检索更多候选，同时保留范围限制。 */
   public List<InMemoryTravelVectorStore.Hit> retrieve(String userMessage, int limit)
       throws IOException {
     if (!config.isTravelRagEnabled() || !isTravelRequest(userMessage)) {
@@ -89,7 +89,7 @@ public final class TravelRagService {
     return hits;
   }
 
-  /** Returns attraction-only candidates so rules and clusters cannot crowd out itinerary slots. */
+  /** 仅返回景点候选，避免规则和聚类占用行程位置。 */
   public List<InMemoryTravelVectorStore.Hit> retrieveAttractionsForPlanning(
       String userMessage, int limit) throws IOException {
     if (!config.isTravelRagEnabled() || !isTravelRequest(userMessage)) return List.of();

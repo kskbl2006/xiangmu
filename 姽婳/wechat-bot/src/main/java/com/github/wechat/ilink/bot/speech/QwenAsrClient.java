@@ -15,7 +15,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/** Base64 audio transcription through Qwen3-ASR's OpenAI-compatible endpoint. */
+/** 通过千问兼容接口识别 Base64 音频。 */
 public final class QwenAsrClient {
   private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
   private final AppConfig config;

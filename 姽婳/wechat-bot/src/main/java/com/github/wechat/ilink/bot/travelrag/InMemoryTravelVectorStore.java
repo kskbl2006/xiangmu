@@ -6,7 +6,7 @@ import java.io.InputStream;
 import java.util.Comparator;
 import java.util.List;
 
-/** Exact cosine search over the small bundled travel index. */
+/** 对内置小型旅行索引执行精确余弦检索。 */
 public final class InMemoryTravelVectorStore {
   public record Hit(TravelKnowledgeChunk chunk, double score) {}
 
